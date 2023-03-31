@@ -1,0 +1,236 @@
+#ifndef FRDESIGNTOOL
+#define FRDESIGNTOOL
+
+#include "Numeric.h"
+#include "Medium.h"
+
+class FRDTComposition{
+ protected:
+  int nucnum;
+  vector<int> nucid;
+  vector<real> density;
+ public:
+  FRDTComposition(){};
+  int GetNucnum(){return nucnum;};
+  int GetNucid(int i){return nucid[i];};
+  real GetDensity(int i){return density[i];};
+  void PutNucnum(int i);
+  void ShowSelf(real factor=1.);
+};
+
+class FRDTFuelComposition:public FRDTComposition{
+ protected:
+  int nucnum_pu;
+  int nucnum_hm;
+  real pu_fissile_enrichment; // wt% (P9&P1)
+  real pu_enrichment; // wt%
+  real u5_enrichment; // wt%
+  real o_m; // (O/M)
+  real pellet_theoretical_density;  // %
+ public:
+  FRDTFuelComposition();
+  void PutPuFissileEnrichment(real a){pu_fissile_enrichment=a;};
+  void PutPuEnrichment(real a){pu_enrichment=a;};
+  void PutU5Enrichment(real a){u5_enrichment=a;};
+  void PutOM(real a){o_m=a;};
+  void PutPelletTheoreticalDensity(real a){pellet_theoretical_density=a;};
+  void PutPlutoniumRatio(real *inp);
+  real GetPelletTheoreticalDensity(){return pellet_theoretical_density;};
+  void ShowPuEnrichment();
+};
+
+class FRDTSUSComposition:public FRDTComposition{
+ protected:
+ public:
+  FRDTSUSComposition();
+  void PutDensityAndRatio(real dinp,real *inp);
+};
+
+class FRDTB4CComposition:public FRDTComposition{
+ protected:
+ public:
+  FRDTB4CComposition(real b10c_wt,real theo_den);
+  // b10c: B-10 concentration (0-1.)
+  // theo_den:theoretical density (0-1.)
+};
+
+
+// ++++++++++++++++++++++++++++++++++++++++
+
+class FRDTBaseGeometry{
+ protected:
+  // Unit of size [mm]
+  real assembly_pitch;
+  real pin_outer_diameter;
+  real pin_thickness;
+  int number_of_pin;
+  real spacerwire_diameter;
+  real spacerwire_pitch;
+  real pellet_outer_diameter;
+  real pellet_invoid_diameter;
+ public:
+  FRDTBaseGeometry();
+  void PutAssemblyPitch(real i){assembly_pitch=i;};
+  void PutPinOuterDiameter(real i){pin_outer_diameter=i;};
+  void PutPinThickness(real i){pin_thickness=i;};
+  void PutNumberOfPin(int i){number_of_pin=i;};
+  void PutSpacerwireDiameter(real i){spacerwire_diameter=i;};
+  void PutSpacerwirePitch(real i){spacerwire_pitch=i;};
+  void PutPelletOuterDiameter(real i){pellet_outer_diameter=i;};
+  void PutPelletInvoidDiameter(real i){pellet_invoid_diameter=i;};
+
+  int GetNumberOfPin(){return number_of_pin;};
+
+  real GetAssemblyVolume();
+  real GetCladVolume();
+  real GetPinVolume(){return GetCladVolume();};
+  real GetSpacerwireVolume();
+  real GetPelletVolume();
+  real GetPelletGapVolume();
+  real GetWholePinVolume();
+  real GetPelletVoidVolume();
+};
+
+class FRDTSubAssemblyGeometry:public FRDTBaseGeometry{
+ protected:
+  // Unit of size [mm]
+  real duct_outersize;
+  real duct_thickness;
+ public:
+  FRDTSubAssemblyGeometry();
+  void PutDuctOutersize(real i){duct_outersize=i;};
+  void PutDuctThickness(real i){duct_thickness=i;};
+
+  real GetDuctVolume();
+  real GetCoolantVolume();
+  real GetOutDuctVolume();
+};
+
+class FRDTControlRodGeometry:public FRDTBaseGeometry{
+ protected:
+  // Unit of size [mm]
+  real guidetube_outer_diameter;
+  real guidetube_thickness;
+  real shieldtube_outer_diameter;
+  real shieldtube_thickness;
+ public:
+  FRDTControlRodGeometry(){};
+
+  void PutGuidetubeOuterDiameter(real i){guidetube_outer_diameter=i;};
+  void PutGuidetubeThickness(real i){guidetube_thickness=i;};
+  void PutShieldtubeOuterDiameter(real i){shieldtube_outer_diameter=i;};
+  void PutShieldtubeThickness(real i){shieldtube_thickness=i;};
+
+  real GetGuidetubeVolume();
+  real GetShieldtubeVolume();
+  real GetCoolantVolume();
+  real GetShieldtubeInsideVolume();
+};
+
+// +++++++++++++++++++++++++++++++++++++++
+
+class FRDTSubAssembly{
+ protected:
+  FRDTSubAssemblyGeometry *fuelsa_geometry;
+  FRDTFuelComposition *fuel_composition;
+  FRDTSUSComposition *sus_composition;
+  bool exist_fuel;
+  bool exist_sus;
+  bool exist_geom;
+  real sodium_number_density;
+  real temperature;
+  real sodium_temperature;
+ public:
+  FRDTSubAssembly();
+  void PutSubAssemblyGeometry(FRDTSubAssemblyGeometry *i){fuelsa_geometry=i; exist_geom=true;};
+  void PutFuelComposition(FRDTFuelComposition *i){fuel_composition=i; exist_fuel=true;};
+  void PutSUSComposition(FRDTSUSComposition *i){sus_composition=i; exist_sus=true;};
+
+  void PutSodiumDensity(real i); // g/cm3
+  real GetSodiumNumberDensity(){return sodium_number_density;};
+
+  void PutTemperature(real temp1,real temp2=0.);
+  void PutSodiumTemperature(real temp){sodium_temperature=temp;};
+  real GetTemperature(){return temperature;};
+  real GetSodiumTemperature(){return sodium_temperature;};
+
+  void CheckExistAllData();
+  void ShowHomogenizedNumberDensity();
+  void ShowHeterogeneousNumberDensity();
+  void PutHomogenizedNumberDensity(Medium &med);
+
+  FRDTSubAssemblyGeometry *GetFuelSAGeometry(){return fuelsa_geometry;};
+  FRDTFuelComposition *GetFuelComposition(){return fuel_composition;};
+  FRDTSUSComposition *GetSUSComposition(){return sus_composition;};
+};
+
+class FRDTControlRod{
+ protected:
+  FRDTControlRodGeometry *cr_geometry;
+  FRDTB4CComposition *b4c_composition;
+  FRDTSUSComposition *sus_composition;
+  real sodium_number_density;
+ public:
+  FRDTControlRod(){};
+  void PutControlRodGeometry(FRDTControlRodGeometry *i){cr_geometry=i;};
+  void PutB4CComposition(FRDTB4CComposition *i){b4c_composition=i;};
+  void PutSUSComposition(FRDTSUSComposition *i){sus_composition=i;};
+
+  void PutSodiumDensity(real i); // g/cm3
+  real GetSodiumNumberDensity(){return sodium_number_density;};
+
+  void ShowHomogenizedNumberDensity();
+  void ShowShieldtubeInsideHomogenizedNumberDensity();
+  void ShowGapSmearedCladNumberDensity();
+  void ShowSpacerwireSmearedCoolantNumberDensity();
+  void ShowSUSSmearedCoolantNumberDensity();
+  void ShowSelf();
+};
+
+// ++++++++++++++++++++++++++++++++++++++++++++++
+
+class FRDTCoreDataManager{
+ private:
+ public:
+  FRDTCoreDataManager(){};
+  void CylinderDataGeneration(int x, int *map, real pitch);
+};
+
+class FRDTAssypow{
+ private:
+  real pitch;
+  real coef[10];
+  real xpos[24];
+  real ypos[24];
+  vector< vector<real> > xyf;
+  real flx[24];
+ public:
+  FRDTAssypow(real ipitch);
+  void DoFitting();
+};
+
+class FRDTAssypow4th{
+ private:
+  real pitch;
+  vector<real> coef;
+  vector<real> xpos;
+  vector<real> ypos;
+  vector< vector<real> > xyf;
+  vector<real> flx;
+  int num_c, num_p;
+ public:
+  FRDTAssypow4th(real ipitch,bool xy=false);
+  void PutNump(int i);
+  void PutNumc(int i);
+  void DoFitting();
+  void PutFlux(real *inp);
+  void PutFlux(int i,real inp){flx[i]=inp;};
+  real GetValue(real x,real y);
+  real GetFlux(int i){return flx[i];};
+  real GetXpos(int i){return xpos[i];};
+  real GetYpos(int i){return ypos[i];};
+};
+
+void GetAssemblyPosition(int layer,real pin_pitch,real *x,real *y);
+
+#endif

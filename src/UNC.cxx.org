@@ -1,0 +1,2019 @@
+#include <cstdlib>
+#include <iostream>
+#include <fstream>
+#include <cstdio>
+#include <cmath>
+#include "UNC.h"
+#include "UNC_Sensitivity.h"
+
+using namespace std;
+
+UncertaintyCalculation::UncertaintyCalculation
+(int g, real *bnd,LibraryCovariance *cinp,
+ SensitivityContainer *sinp,LibraryContainer *linp,
+ ParametersContainer *cvalinp, Parameters *evalinp,
+ ParameterCovariance *ccovinp, ParameterCovariance *ecovinp)
+{
+  cov_con=cinp;
+  sens_con=sinp;
+  lib_con=linp;
+  cval_con=cvalinp;
+  cval_cov=ccovinp;
+  eval=evalinp;
+  eval_cov=ecovinp;
+
+  PutEnergyGroupInfo(g,bnd);
+
+  uq_on=false;
+};
+
+UncertaintyCalculation::UncertaintyCalculation(int g, real *bnd)
+{
+  PutEnergyGroupInfo(g,bnd);
+
+  uq_on=false;
+};
+
+UncertaintyCalculation::UncertaintyCalculation(XSLibrary &xslib)
+{
+  int g=xslib.GetGroup();
+  real *bnd=new real[g+1];
+  for(int i=0;i<g+1;i++){
+    bnd[i]=xslib.GetEnband().get_dat(i);
+  };
+  PutEnergyGroupInfo(g,bnd);
+  delete [] bnd;
+
+  uq_on=false;
+};
+
+// 
+
+void UncertaintyCalculation::PutEnergyGroupInfo(int g, real *bnd)
+{
+  grp=g;
+  ebnd.put_imax(grp+1);
+  for(int i=0;i<grp+1;i++){
+    ebnd.put_data(i,bnd[i]);
+  };
+};
+
+void UncertaintyCalculation::GetCEValue(ParametersContainer &cval_con,Parameters &eval)
+{
+  int clib=cval_con.GetSize();
+  if(clib==0){
+    cout<<"There is no parameters.\n";
+    exit(0);
+  };
+
+  int size=eval.GetParameterList()->GetSize();
+  cout<<"*************************************************\n";
+  cout<<"           ";
+  for(int i=0;i<clib;i++){
+    cout<<cval_con.GetName(i)<<" ";
+  };
+  cout<<"\n";
+  cout<<"*************************************************\n";
+
+  for(int i=0;i<size;i++){
+    string core=eval.GetParameterList()->GetCoreTag(i);
+    string chara=eval.GetParameterList()->GetCharaTag(i);
+    int step=eval.GetParameterList()->GetStepTag(i);
+    real e=eval.GetValue(i);
+    cout<<core<<" "<<chara<<" "<<step<<" : ";
+    for(int j=0;j<clib;j++){
+      int pos=cval_con.GetParameters(j).GetParameterList()->FindData(core,chara,step);
+      real c;
+      if(pos!=-1){
+        c=cval_con.GetParameters(j).GetValue(pos);
+      }else{
+	c=0.;
+      };
+      cout<<c/e<<"  ";
+    };
+    cout<<"\n";
+  };
+};
+
+void UncertaintyCalculation::GetCEValue(ParametersContainer &cval_con,Parameters &eval,string libname)
+{
+  int tmp=cval_con.FindData(libname);
+  if(tmp==-1){
+    cout<<"There is no parameters "<<libname<<"\n";
+    exit(0);
+  };
+
+  Parameters cval=cval_con.GetParameters(libname);
+
+  int size=eval.GetParameterList()->GetSize();
+  for(int i=0;i<size;i++){
+    string core=eval.GetParameterList()->GetCoreTag(i);
+    string chara=eval.GetParameterList()->GetCharaTag(i);
+    int step=eval.GetParameterList()->GetStepTag(i);
+    int pos=cval.GetParameterList()->FindData(core,chara,step);
+    if(pos!=-1){
+      real c=cval.GetValue(pos);
+      real e=eval.GetValue(i);
+      cout<<core<<" "<<chara<<" "<<step<<" : "<<c/e<<"\n";
+    };
+  };
+};
+
+real UncertaintyCalculation::CalCrossSectionUncertainty
+(SensitivityContainer &sens_con, LibraryCovariance &lib_cov,
+ string core,string chara,int step,real mean,bool print)
+{
+  if(print){
+  cout<<"********************************************************\n";
+  cout<<"* Cross section-induced uncertainty\n";
+  cout<<"********************************************************\n";
+  cout<<"* Integral Data : core   "<<core<<"\n";
+  cout<<"*               : Chara. "<<chara<<"\n";
+  cout<<"*               : step   "<<step<<"\n";
+  cout<<"********************************************************\n";
+  };
+
+  int tmp=sens_con.GetParameterList()->FindData(core,chara,step);
+  if(tmp==-1){
+    cout<<"There is no sensitivity data ...\n";
+    exit(0);
+  };
+
+  SensitivityData sens=sens_con.GetSensitivityData(core,chara,step);
+
+  real totsol=0;
+  real maxcomp=0.;
+  //int max1,max2;
+  for(int i=0;i<lib_cov.GetSize();i++){
+    CrossSectionCovariance xscov=lib_cov.GetCrossSectionCovariance(i);
+    int mat1 =xscov.GetMat1();
+    int mt1  =xscov.GetMt1();
+    int mat2 =xscov.GetMat2();
+    int mt2  =xscov.GetMt2();
+    int tmp1=sens.FindData1D(mat1,mt1);
+    int tmp2=sens.FindData1D(mat2,mt2);
+    if(tmp1!=-1&&tmp2!=-1){
+      GroupData1D s1=sens.GetSensitivity1D(mat1,mt1);
+      GroupData1D s2=sens.GetSensitivity1D(mat2,mt2);
+      GroupData2D cov=xscov.GetCovariance("relative");
+      real sol=s1*(cov*s2);
+      if(mat1!=mat2||mt1!=mt2)sol*=2;
+      totsol+=sol;
+      if(print&&sqrt(fabs(sol))>mean){
+	cout<<"* ";
+        WriteOut(mat1,7);
+	cout<<":";
+        WriteOut(mt1,3);
+	cout<<" & ";
+	WriteOut(mat2,7);
+	cout<<":";
+	WriteOut(mt2,3);
+	cout<<"  ";
+	if(sol>0.)cout<<" ";
+        cout.setf(ios::scientific);
+        cout.precision(4);
+	cout<<sol;
+        cout.unsetf(ios::scientific);
+        cout.setf(ios::showpoint);
+        cout.precision(4);
+        cout<<"  (";
+        if(sol>0.){cout<<" ";}else{cout<<"-";};
+        cout<<sqrt(fabs(sol))<<")\n";
+        cout.unsetf(ios::showpoint);
+      };
+      //
+      if(uq_on){
+        if(mt1!=181){
+          for(int g=0;g<grp;g++){
+            real s1d=s1.get_dat(g);
+	    for(int g2=0;g2<grp;g2++){
+	      real tmpv=s1d*s2.get_dat(g2)*cov.get_dat(g,g2);
+	      if(tmpv>maxcomp){
+                maxcomp=tmpv;
+	    //max1=mat1;
+	    //max2=mt1;
+	      };
+	    };
+	  };
+	};
+      };
+      //
+    };
+  };
+
+  if(print){
+    cout<<"********************************************************\n";
+    cout.setf(ios::scientific);
+    cout.precision(4);
+    cout<<"* Total uncertainty     "<<totsol;
+    cout.unsetf(ios::scientific);
+    cout.setf(ios::showpoint);
+    cout.precision(4);
+    cout<<"  ("<<sqrt(fabs(totsol))<<")\n";
+    cout.unsetf(ios::showpoint);
+    cout<<"********************************************************\n";
+  };
+
+  if(uq_on){
+  maxcomp=1./maxcomp;
+  for(int i=0;i<lib_cov.GetSize();i++){
+    CrossSectionCovariance xscov=lib_cov.GetCrossSectionCovariance(i);
+    int mat1 =xscov.GetMat1();
+    int mt1  =xscov.GetMt1();
+    int mat2 =xscov.GetMat2();
+    int mt2  =xscov.GetMt2();
+    int tmp1=sens.FindData1D(mat1,mt1);
+    int tmp2=sens.FindData1D(mat2,mt2);
+    if(tmp1!=-1&&tmp2!=-1){
+      GroupData1D s1=sens.GetSensitivity1D(mat1,mt1);
+      GroupData1D s2=sens.GetSensitivity1D(mat2,mt2);
+      GroupData2D cov=xscov.GetCovariance("relative");
+      string outfile=filename_uq+"_"+IntToString(mat1)+"_"+IntToString(mt1);
+      if(mat2!=mat1||mt2!=mt1)outfile+="_"+IntToString(mat2)+"_"+IntToString(mt2);
+      ShowCrossSectionUncertaintyComponentXYPlot(s1,s2,cov,maxcomp,outfile);
+    };
+  };
+  };
+
+  return totsol;
+};
+
+void UncertaintyCalculation::CalCrossSectionUncertaintyDetail
+(SensitivityContainer &sens_con, LibraryCovariance &lib_cov,
+ int mat,int mt,string core,string chara,int step)
+{
+  int tmp=sens_con.GetParameterList()->FindData(core,chara,step);
+  if(tmp==-1){
+    cout<<"# There is no sensitivity data ...\n";
+    cout<<"# "<<core<<" "<<chara<<" "<<step<<"\n";
+    exit(0);
+  };
+  SensitivityData sens=sens_con.GetSensitivityData(core,chara,step);
+
+  int tmp1=sens.FindData1D(mat,mt);
+  if(tmp1==-1){
+    cout<<"# There is no sensitivity data ...\n";
+    cout<<"# (MAT/MT)=("<<mat<<"/"<<mt<<")\n";
+    exit(0);
+  };
+  GroupData1D sen1d=sens.GetSensitivity1D(mat,mt);
+
+  int tmp2=lib_cov.FindData(mat,mt,mat,mt);
+  if(tmp2==-1){
+    cout<<"# There is no covariance data ...\n";
+    cout<<"# (MAT/MT)=("<<mat<<"/"<<mt<<")\n";
+    exit(0);
+  };
+  CrossSectionCovariance xscov=lib_cov.GetCrossSectionCovariance(tmp2);
+
+  cout<<"**************************************************\n";
+  cout<<"* Cross section-induced uncertainty\n";
+  cout<<"**************************************************\n";
+  cout<<"* Integral Data : core   "<<core<<"\n";
+  cout<<"*               : Chara. "<<chara<<"\n";
+  cout<<"*               : step   "<<step<<"\n";
+  cout<<"* Nuclear Data  : (MAT/MT)=("<<mat<<"/"<<mt<<")\n";
+  cout<<"**************************************************\n";
+
+  real e_fast=0.;
+  real e_inter=0.;
+  real e_thml=0.;
+  int g_fast=0;
+  int g_inter=0;
+  int g_thml=0;
+  for(int i=0;i<grp;i++){
+    real e=ebnd.get_dat(i+1);
+    if(e_fast==0.&&e<1e5){
+      e_fast=e;
+      g_fast=i+1;
+    };
+    if(e_inter==0.&&e<1e2){
+      e_inter=e;
+      g_inter=i+1;
+    };
+    if(e_thml==0.&&e<0.625){
+      e_thml=e;
+      g_thml=i+1;
+    };
+  };
+
+  vector<int> g_st(4);
+  vector<int> g_ed(4);
+  g_st[0]=0;
+  g_ed[0]=g_fast;
+  g_st[1]=g_fast+1;
+  g_ed[1]=g_inter;
+  g_st[2]=g_inter+1;
+  g_ed[2]=g_thml;
+  g_st[3]=g_thml+1;
+  g_ed[3]=grp-1;
+
+  GroupData2D cov(4,4);
+
+  real sum=0.;
+  for(int i=0;i<4;i++){
+    GroupData1D tmp1(grp);
+    tmp1.set_zero();
+    for(int g=g_st[i];g<=g_ed[i];g++){
+      tmp1.put_data(g,sen1d.get_dat(g));
+    };
+    for(int j=0;j<4;j++){
+      GroupData1D tmp2(grp);
+      tmp2.set_zero();
+      for(int g=g_st[j];g<=g_ed[j];g++){
+        tmp2.put_data(g,sen1d.get_dat(g));
+      };
+      real unc=tmp1*(xscov.GetCovariance("Relative")*tmp2);
+      cov.put_data(i,j,unc);
+      sum+=unc;
+    };
+  };
+
+  cout<<"# [Enregy range definition]\n#\n";
+  cout<<"#  Fast range     : "<<e_fast<<" [eV]-\n";
+  cout<<"#  Inter.-1 range : "<<e_inter<<" [eV]-\n";
+  cout<<"#  Inter.-2 range : "<<e_thml<<" [eV]-\n";
+  cout<<"#  Thermel range  : below "<<e_thml<<" [eV]\n";
+  cout<<"#\n";
+
+  string name[]={
+    "Fast   ","Inter-1","Inter-2","Thermal"
+  };
+  cout<<"# Range-wise variance & Std.Dev.\n#\n";
+  for(int i=0;i<4;i++){
+    real val=cov.get_dat(i,i);
+    cout<<"# "<<name[i]<<" : "<<val<<"   "<<sqrt(val)<<"\n";
+  };
+  cout<<"#\n";
+
+  //cout<<"# Range-range covariance & Std.Dev.\n#\n";
+  cout<<"# Range-range covariance & correlation \n#\n";
+  for(int i=0;i<4;i++){
+    for(int j=i+1;j<4;j++){
+      real val=cov.get_dat(i,j);
+      if(val!=0.){
+        //val+=cov.get_dat(j,i);
+        cout<<"# "<<name[i]<<"-"<<name[j]<<" : ";
+        cout<<val<<"   ";
+	cout<<val/sqrt(cov.get_dat(i,i)*cov.get_dat(j,j));
+	/*
+        if(val>=0.){
+	  cout<<"+"<<sqrt(val);
+        }else{
+	  cout<<"-"<<sqrt(-val);
+        };
+	*/
+	cout<<"\n";
+      };
+    };
+  };
+
+  cout<<"**************************************************\n";
+}
+
+real UncertaintyCalculation::CalG1MG2
+(SensitivityContainer &sens_con, LibraryCovariance &lib_cov,
+ string core,string chara,int step,string core2,string chara2,int step2)
+{
+  int tmp=sens_con.GetParameterList()->FindData(core,chara,step);
+  int tmp2=sens_con.GetParameterList()->FindData(core2,chara2,step2);
+  if(tmp==-1||tmp2==-1){
+    cout<<"There is no sensitivity data ...\n";
+    exit(0);
+  };
+
+  SensitivityData sens1=sens_con.GetSensitivityData(core,chara,step);
+  SensitivityData sens2=sens_con.GetSensitivityData(core2,chara2,step2);
+
+  return CalG1MG2(sens1,sens2,lib_cov);
+}
+
+real UncertaintyCalculation::CalG1MG2
+(SensitivityData &sens1, SensitivityData &sens2, LibraryCovariance &lib_cov)
+{
+  real totsol=0;
+  for(int i=0;i<lib_cov.GetSize();i++){
+    CrossSectionCovariance xscov=lib_cov.GetCrossSectionCovariance(i);
+    int mat1 =xscov.GetMat1();
+    int mt1  =xscov.GetMt1();
+    int mat2 =xscov.GetMat2();
+    int mt2  =xscov.GetMt2();
+    int tmp1=sens1.FindData1D(mat1,mt1);
+    int tmp2=sens2.FindData1D(mat2,mt2);
+    if(tmp1!=-1&&tmp2!=-1){
+      GroupData1D dum(grp);
+      dum=xscov.GetCovariance("relative")*sens2.GetSensitivity1D(mat2,mt2);
+      real sol=sens1.GetSensitivity1D(mat1,mt1)*dum;
+      if(mat1!=mat2||mt1!=mt2){
+        int tmp3=sens1.FindData1D(mat2,mt2);
+        int tmp4=sens2.FindData1D(mat1,mt1);
+        if(tmp3!=-1&&tmp4!=-1){
+          dum=xscov.GetCovariance("relative")*sens1.GetSensitivity1D(mat2,mt2);
+          sol+=sens2.GetSensitivity1D(mat1,mt1)*dum;
+	};
+      };
+      totsol+=sol;
+    };
+  };
+  return totsol;
+}
+
+
+real UncertaintyCalculation::CalUncertaintyWithoutAnyInformation
+(string core,string chara,int step)
+{
+  //real xs_cov=CalCrossSectionUncertainty(core,chara,step,false);
+  //real method_cov=cval_cov->GetStandardDeviation(core,chara,step,"Relative");
+  //method_cov*=method_cov;
+  //cout<<"Cross section-induced component : "<<xs_cov<<" ("<<sqrt(xs_cov)<<")\n";
+  //cout<<"Method component                : "<<method_cov<<" ("<<sqrt(method_cov)<<")\n";
+  //real tot_cov=xs_cov+method_cov;
+  //cout<<"Total uncertainty               : "<<tot_cov<<" ("<<sqrt(tot_cov)<<")\n";
+  //return tot_cov;
+  return 0.;
+};
+
+real UncertaintyCalculation::CalCrossSectionUncertaintyBiasMethod
+(string core1,string chara1,string core2,string chara2,int step1,int step2,bool print)
+{
+  if(print){
+  cout<<"****************************************\n";
+  cout<<"* Cross section-induced uncertainty with Bias method\n";
+  cout<<"****************************************\n";
+  cout<<"* Mock-up Core   : "<<core1<<"\n";
+  cout<<"*         Chara. : "<<chara1<<"\n";
+  cout<<"*         Step   : "<<step1<<"\n";
+  cout<<"* Target  Core   : "<<core2<<"\n";
+  cout<<"*         Chara. : "<<chara2<<"\n";
+  cout<<"*         Step   : "<<step2<<"\n";
+  cout<<"****************************************\n";
+  };
+
+  int tmp1=sens_con->GetParameterList()->FindData(core1,chara1,step1);
+  int tmp2=sens_con->GetParameterList()->FindData(core2,chara2,step2);
+  if(tmp1==-1||tmp2==-1){
+    cout<<"There is no sensitivity data ...\n";
+    exit(0);
+  };
+
+  int numcov=cov_con->GetSize();
+
+  real totsol=0;
+  for(int i=0;i<numcov;i++){
+    int mat1 =cov_con->GetCrossSectionCovariance(i).GetMat1();
+    int mt1  =cov_con->GetCrossSectionCovariance(i).GetMt1();
+    int mat2 =cov_con->GetCrossSectionCovariance(i).GetMat2();
+    int mt2  =cov_con->GetCrossSectionCovariance(i).GetMt2();
+    GroupData1D sens11(grp);
+    GroupData1D sens12(grp);
+    GroupData1D sens21(grp);
+    GroupData1D sens22(grp);
+    if(sens_con->GetSensitivityData(tmp1).FindData1D(mat1,mt1)!=-1){
+      sens11.copy(sens_con->GetSensitivityData(tmp1).GetSensitivity1D(mat1,mt1));
+    };
+    if(sens_con->GetSensitivityData(tmp2).FindData1D(mat1,mt1)!=-1){
+      sens21.copy(sens_con->GetSensitivityData(tmp2).GetSensitivity1D(mat1,mt1));
+    };
+    if(sens_con->GetSensitivityData(tmp1).FindData1D(mat2,mt2)!=-1){
+      sens12.copy(sens_con->GetSensitivityData(tmp1).GetSensitivity1D(mat2,mt2));
+    };
+    if(sens_con->GetSensitivityData(tmp2).FindData1D(mat2,mt2)!=-1){
+      sens22.copy(sens_con->GetSensitivityData(tmp2).GetSensitivity1D(mat2,mt2));
+    };
+    GroupData1D dum(grp);
+    GroupData1D difsens1(grp);
+    GroupData1D difsens2(grp);
+    difsens1=sens11-sens21;
+    difsens2=sens12-sens22;
+    dum=cov_con->GetCrossSectionCovariance(i).GetCovariance("Relative")*difsens2;
+    real sol=difsens1*dum;
+    if(mat1!=mat2||mt1!=mt2)sol*=2;
+    totsol+=sol;
+    if(sol!=0.){
+      if(print){
+      cout<<"* "<<mat1<<":"<<mt1<<" & "<<mat2<<":"<<mt2<<"  "<<sol;
+      cout.setf(ios::showpoint);
+      cout.precision(6);
+      cout<<"("<<sqrt(fabs(sol))<<")\n";
+      cout.unsetf(ios::showpoint);
+      };
+    };
+  };
+  if(print){
+  cout<<"****************************************\n";
+  cout<<"* Total Unc.: "<<totsol;
+  cout.setf(ios::showpoint);
+  cout.precision(6);
+  cout<<" ("<<sqrt(fabs(totsol))<<")\n";
+  cout.unsetf(ios::showpoint);
+  cout<<"****************************************\n";
+  };
+
+  return totsol;
+}
+
+real UncertaintyCalculation::CalUncertaintyBiasMethod
+(string core1,string chara1,string core2,string chara2,int step1,int step2,bool print)
+{
+  real xs_cov=CalCrossSectionUncertaintyBiasMethod(core1,chara1,core2,chara2,step1,step2,false);
+  real exp_cov=eval_cov->GetStandardDeviation(core1,chara1,step1,"Relative");
+  real mtd1_cov=cval_cov->GetStandardDeviation(core1,chara1,step1,"Relative");
+  real mtd2_cov=cval_cov->GetStandardDeviation(core2,chara2,step2,"Relative");
+  real corr_mtd=cval_cov->GetCorrelation(core1,chara1,core2,chara2,step1,step2);
+  real corr=-1.*(corr_mtd*mtd1_cov*mtd2_cov);
+  exp_cov*=exp_cov;
+  mtd1_cov*=mtd1_cov;
+  mtd2_cov*=mtd2_cov;
+  real tot_cov=xs_cov+exp_cov+mtd1_cov+mtd2_cov+corr;
+  if(print){
+  cout<<"Cross section-induced component : "<<xs_cov<<" ("<<sqrt(xs_cov)<<")\n";
+  cout<<"Experimental component          : "<<exp_cov<<" ("<<sqrt(exp_cov)<<")\n";
+  cout<<"Mockup method component         : "<<mtd1_cov<<" ("<<sqrt(mtd1_cov)<<")\n";
+  cout<<"Target method component         : "<<mtd2_cov<<" ("<<sqrt(mtd2_cov)<<")\n";
+  cout<<"Target correlation component         : "<<corr<<" ("<<sqrt(mtd2_cov)<<")\n";
+  cout<<"Total uncertainty               : "<<tot_cov<<" ("<<sqrt(tot_cov)<<")\n";
+  };
+  return tot_cov;
+};
+
+void UncertaintyCalculation::SearchBestMockup(string core,string chara,int step)
+{
+  int size=eval->GetParameterList()->GetSize();
+  real errmin=1000000.;
+  int tag=-1;
+  for(int i=0;i<size;i++){
+    string core2=eval->GetParameterList()->GetCoreTag(i);
+    string chara2=eval->GetParameterList()->GetCharaTag(i);
+    int step2=eval->GetParameterList()->GetStepTag(i);
+    if(core!=core2||chara!=chara2||step!=step2){
+      real err=CalUncertaintyBiasMethod(core2,chara2,core,chara,step2,step,false);
+      if(err<errmin){
+        errmin=err;
+	tag=i;
+      };
+    };
+  };
+
+  cout<<"The best mockup system for "<<core<<" "<<chara<<" "<<step<<" is...\n";
+  string core2=eval->GetParameterList()->GetCoreTag(tag);
+  string chara2=eval->GetParameterList()->GetCharaTag(tag);
+  int step2=eval->GetParameterList()->GetStepTag(tag);
+  cout<<"   "<<core2<<" "<<chara2<<" "<<step2<<"\n";
+  cout<<"  Uncertainty is "<<errmin<<" ("<<sqrt(errmin)<<")\n";
+};
+
+real UncertaintyCalculation::CalLibraryEffect
+(SensitivityContainer &sens_con,LibraryContainer &lib_con,
+ string core,string chara,int step,string libname1,string libname2,real mean,bool en,bool print)
+{
+  if(print){
+  cout<<"********************************************************************************\n";
+  cout<<"* Library effect calculation            \n";
+  cout<<"*       by UncertaintyCalculation       \n";
+  cout<<"********************************************************************************\n";
+  cout<<"* Integral Data : core   "<<core<<"\n";
+  cout<<"*               : Chara. "<<chara<<"\n";
+  cout<<"*               : step   "<<step<<"\n";
+  cout<<"*   "<<libname1<<" -> "<<libname2<<"\n";
+  cout<<"********************************************************************************\n";
+  };
+
+  int tmp=sens_con.GetParameterList()->FindData(core,chara,step);
+  if(tmp==-1){
+    cout<<"There is no sensitivity data ...\n";
+    exit(0);
+  };
+
+  Library lib1=lib_con.GetLibrary(libname1);
+  Library lib2=lib_con.GetLibrary(libname2);
+
+  real totval=0.;
+
+  // for 1D xs
+  int nxs1=lib1.GetSize();
+  for(int i=0;i<nxs1;i++){
+    int mat=lib1.GetMatList(i);
+    int mt=lib1.GetMtList(i);
+    int tmp=lib2.FindData(mat,mt);
+    int tmpsens=sens_con.GetSensitivityData(core,chara,step).FindData1D(mat,mt);
+    if(tmp!=-1&&tmpsens!=-1){
+      GroupData1D diff(grp);
+      // (fission spectrum normalization)
+      real sum1=0.;
+      real sum2=0.;
+      if(mt==181){
+	sum1=lib1.GetCrossSection(i).get_sum();
+	sum2=lib2.GetCrossSection(tmp).get_sum();
+	sum1=1./sum1;
+	sum2=1./sum2;
+      };
+      for(int j=0;j<grp;j++){
+	real tmp1=lib1.GetCrossSection(i).get_dat(j);
+	real tmp2=lib2.GetCrossSection(tmp).get_dat(j);
+	if(mt==181){
+	  tmp1*=sum1;
+	  tmp2*=sum2;
+	};
+	if(mt==251||mt==181){
+	  diff.put_data(j,tmp2-tmp1);
+	}else{
+	  if(tmp1!=0.&&tmp2!=0.){
+            diff.put_data(j,(tmp2-tmp1)/tmp1);
+	  }
+          else{
+            diff.put_data(j,0.);
+          };
+	};
+      };
+      real pos_effect=0.;
+      real neg_effect=0.;
+      GroupData1D effect(grp);
+      effect=diff.mult(sens_con.GetSensitivity1D(mat,mt,core,chara,step));
+      for(int j=0;j<grp;j++){
+	real tmp=effect.get_dat(j);
+	if(tmp>0.){pos_effect+=tmp;}
+	else{neg_effect+=tmp;};
+      };
+      real value=pos_effect+neg_effect;
+      if(print){
+      if(en&&(pos_effect>mean||neg_effect<mean*-1)){
+        cout<<"\n\n# Energy group-contribution : "<<mat<<" / "<<mt<<"\n";
+	cout<<"#              [/lethargy*0.25]\n";
+	cout.setf(ios::scientific);
+	cout.precision(5);
+        for(int j=0;j<grp;j++){
+	  real e1=ebnd.get_dat(j);
+	  real e2=ebnd.get_dat(j+1);
+          real letwid=log(e1/e2);
+	  letwid/=0.25;
+          cout<<"    "<<e1<<" "<<effect.get_dat(j)/letwid<<"\n";
+	};
+      };
+      };
+      totval+=value;
+      if(print){
+      if(fabs(value)>mean||fabs(pos_effect)>mean||fabs(neg_effect)>mean){
+	cout.setf(ios::showpoint);
+	cout.precision(5);
+        cout<<"#* mat:";
+        WriteOut(mat,6);
+        cout<<" & mt:";
+        WriteOut(mt,3);
+        cout<<" : ";
+        if(value>=0.)cout<<" ";
+        cout<<value;
+	cout<<"  ("<<pos_effect<<","<<neg_effect<<")\n";
+      };
+      };
+    };
+  };
+
+  // for 2D xs
+  nxs1=lib1.GetSize2D();
+  for(int i=0;i<nxs1;i++){
+    int mat=lib1.GetMatList2D(i);
+    int mt=lib1.GetMtList2D(i);
+    int tmp=lib2.FindData2D(mat,mt);
+    int tmpsens=sens_con.GetSensitivityData(core,chara,step).FindData2D(mat,mt);
+    if(tmp!=-1&&tmpsens!=-1){
+      GroupData2D diff(grp,grp);
+      for(int j=0;j<grp;j++){
+	//for(int k=j;k<grp;k++){
+	  for(int k=0;k<grp;k++){
+	  real tmp1=0.;
+	  real tmp2=0.;
+	  if(lib1.GetCrossSection2D(i).get_y()!=0){
+  	    tmp1=lib1.GetCrossSection2D(i).get_dat(j,k);
+	  };
+	  if(lib2.GetCrossSection2D(tmp).get_y()!=0){
+  	    tmp2=lib2.GetCrossSection2D(tmp).get_dat(j,k);
+	  };
+  	  //real tmp1=lib1.GetCrossSection2D(i).get_dat(j,k);
+	  //real tmp2=lib2.GetCrossSection2D(tmp).get_dat(j,k);
+          if(mt!=2){
+            diff.put_data(j,k,tmp2-tmp1);
+	  }else{
+	  if(tmp1!=0.&&tmp2!=0.){
+            diff.put_data(j,k,(tmp2-tmp1)/tmp1);}
+          else{
+            diff.put_data(j,k,0.);
+          };
+	  };
+	};
+      };
+      real pos_effect=0.;
+      real neg_effect=0.;
+      vector<real> effect(grp);
+      GroupData2D senstmp=sens_con.GetSensitivityData(core,chara,step).GetSensitivity2D(mat,mt);
+      for(int j=0;j<grp;j++){
+        real tmp=0.;
+	//for(int k=j;k<grp;k++){
+	for(int k=0;k<grp;k++){
+	  tmp+=diff.get_dat(j,k)*senstmp.get_dat(j,k);
+	};
+	if(tmp>0.){pos_effect+=tmp;}
+	else{neg_effect+=tmp;};
+	effect[j]=tmp;
+      };
+      real value=pos_effect+neg_effect;
+      if(print){
+      if(en&&(pos_effect>mean||neg_effect<mean*-1)){
+        cout<<"\n\n# Energy group-contribution : "<<mat<<" / "<<mt<<"\n";
+	cout<<"#              [/lethargy*0.25]\n";
+	cout.setf(ios::scientific);
+	cout.precision(5);
+        for(int j=0;j<grp;j++){
+	  real e1=ebnd.get_dat(j);
+	  real e2=ebnd.get_dat(j+1);
+          real letwid=log(e1/e2);
+	  letwid/=0.25;
+          if(print)cout<<"    "<<e1<<" "<<effect[j]/letwid<<"\n";
+	};
+      };
+      };
+      totval+=value;
+      if(print){
+      if(fabs(value)>mean||fabs(pos_effect)>mean||fabs(neg_effect)>mean){
+	cout.setf(ios::showpoint);
+	cout.precision(5);
+        cout<<"#* mat:";
+        WriteOut(mat,6);
+        cout<<" & mt:";
+        WriteOut(mt,3);
+        cout<<" : ";
+        if(value>=0.)cout<<" ";
+	cout<<value;
+	cout<<"  ("<<pos_effect<<","<<neg_effect<<")\n";
+      };
+      };
+    };
+  };
+
+  if(print){
+  cout<<"********************************************************************************\n";
+  cout<<"* Total :"<<totval<<"\n";
+  /*
+  int tmp1=cval_con.FindData(libname1);
+  int tmp2=cval_con.FindData(libname2);
+  if(tmp1!=-1&&tmp2!=-1){
+    int tmp1=cval_con.GetParameters(libname1).GetParameterList()->FindData(core,chara,step);
+    int tmp2=cval_con.GetParameters(libname2).GetParameterList()->FindData(core,chara,step);
+    if(tmp1!=-1&&tmp2!=-1){
+      real c1=cval_con.GetParameters(libname1).GetValue(tmp1);
+      real c2=cval_con.GetParameters(libname2).GetValue(tmp2);
+      cout<<"* Direct Calc. : "<<(c2-c1)/c1<<"\n";
+    };
+  };
+  */
+  cout<<"********************************************************************************\n";
+  };
+
+  return totval;
+}
+
+void UncertaintyCalculation::CalLibraryEffect
+(SensitivityContainer &sens_con,BurnupChain &chain1, BurnupChain &chain2, string core,string chara,int step,real mean)
+{
+  SensitivityData snsd=sens_con.GetSensitivityData(core,chara,step);
+  int sz0=snsd.GetSize0D();
+  real sum=0.;
+  for(int i=0;i<sz0;i++){
+    int mt=snsd.GetMtList0D(i);
+    int mat=snsd.GetMatList0D(i);
+    if(mt==8888){ // half-life sensitivity
+      real dc1=chain1.GetDecayConstant(mat);
+      real dc2=chain2.GetDecayConstant(mat);
+      if(dc1!=0.&&dc2!=0.){
+	real hl1=1./dc1;
+	real hl2=1./dc2;
+	real rdif=(hl2-hl1)/hl1;
+	real eff=snsd.GetSensitivity0D(mat,mt)*rdif;
+	sum+=eff;
+	if(fabs(eff)>mean){
+   	  cout<<"# Half-life of "<<midt.Name(mat)<<" : "<<eff<<"\n";
+	};
+      };
+    }else if(mt>18000000){
+      int matf=mt-18000000;
+      real fy1=chain1.GetFissionYield(matf,mat);
+      real fy2=chain2.GetFissionYield(matf,mat);
+      if(fy1>0.&&fy2>0.){
+	real rdif=(fy2-fy1)/fy1;
+	real eff=snsd.GetSensitivity0D(mat,mt)*rdif;
+	sum+=eff;
+	if(fabs(eff)>mean){
+   	  cout<<"# Yield of "<<midt.Name(mat)<<" from "<<midt.Name(matf)<<" : "<<eff<<"\n";
+	};
+      };
+    };
+  };
+  cout<<"#\n# Total effect : "<<sum<<"\n#\n";
+};
+
+ParameterCovariance UncertaintyCalculation::GetGMG
+(Library &lib,LibraryCovariance &xscov_con,Parameters &cal_val,SensitivityContainer &sens_con)
+{
+  int cal_size=cal_val.GetParameterList()->GetSize();
+  int cov_size=xscov_con.GetSize();
+
+  ParameterCovariance gmg(cal_val);
+
+  GroupData2D gmg_data(cal_size,cal_size);
+
+  // GMG
+  for(int i=0;i<cov_size;i++){
+    CrossSectionCovariance cov=xscov_con.GetCrossSectionCovariance(i);
+    GroupData2D covdata=cov.GetCovariance("Relative");
+    int mat1=cov.GetMat1();
+    int mt1 =cov.GetMt1();
+    int mat2=cov.GetMat2();
+    int mt2 =cov.GetMt2();
+    for(int j1=0;j1<cal_size;j1++){
+      for(int j2=0;j2<cal_size;j2++){
+	int tmp1=sens_con.GetSensitivityData(j1).FindData1D(mat1,mt1);
+	int tmp2=sens_con.GetSensitivityData(j2).FindData1D(mat2,mt2);
+	if(tmp1!=-1&&tmp2!=-1){
+	  gmg_data.add_data
+          (j1,j2,sens_con.GetSensitivityData(j1).GetSensitivity1D(mat1,mt1)*
+                 (covdata*sens_con.GetSensitivityData(j2).GetSensitivity1D(mat2,mt2)));
+	};
+	tmp1=sens_con.GetSensitivityData(j1).FindData1D(mat2,mt2);
+	tmp2=sens_con.GetSensitivityData(j2).FindData1D(mat1,mt1);
+        if(mat1!=mat2||mt1!=mt2){
+    	  if(tmp1!=-1&&tmp2!=-1){
+	    gmg_data.add_data(j1,j2,sens_con.GetSensitivityData(j1).GetSensitivity1D(mat2,mt2)
+	      *(covdata.GetTransposedMatrix()*sens_con.GetSensitivityData(j2).GetSensitivity1D(mat1,mt1)));
+	  };
+	};
+      };
+    };
+  };
+
+  gmg.PutCov(gmg_data,"Relative");
+
+  return gmg;
+};
+
+void UncertaintyCalculation::DoUncertaintyLibraryAdjustment
+(SensitivityContainer &sens_con, ParameterCovariance &cal_cov,
+ ParameterCovariance &exp_cov, Parameters &cal_val,
+ Parameters &exp_val, Library &lib, LibraryCovariance &lib_cov)
+{
+  int sens_size=sens_con.GetParameterList()->GetSize();
+
+  cout<<"****************************************\n";
+  cout<<"* Cross section adjustment              \n";
+  cout<<"*       by UncertaintyCalculation       \n";
+  cout<<"****************************************\n";
+  cout<<"* Number of integral data    : "<<sens_size<<"\n";
+  cout<<"****************************************\n";  
+
+  ParameterCovariance xs_cov=GetGMG(lib,lib_cov,cal_val,sens_con);
+
+  GroupData2D inv(sens_size,sens_size);
+  inv=xs_cov.GetCovariance("Relative")
+    +cal_cov.GetCovariance("Relative")
+    +exp_cov.GetCovariance("Relative");
+
+  Parameters ce(cal_val.GetParameterList());
+  for(int i=0;i<sens_size;i++){
+    ce.PutValue(i,cal_val.GetValue(i)/exp_val.GetValue(i));
+  };
+
+  ParameterCovariance total_cov(ce);
+  total_cov.PutCov(inv,"Relative");
+
+  cout<<"* Prior C/E values with total uncertainties\n";
+  cout<<"*\n";
+  for(int i=0;i<sens_size;i++){
+    cout<<"*  "<<sens_con.GetParameterList()->GetCoreTag(i);
+    cout<<","<<sens_con.GetParameterList()->GetCharaTag(i);
+    cout<<","<<sens_con.GetParameterList()->GetStepTag(i);
+    cout<<" : "<<ce.GetValue(i)<<" ("<<sqrt(inv.get_dat(i,i))<<")\n";
+  };
+  cout<<"****************************************\n";  
+
+  cout<<"* Correlation matrix of GMG+Ve+Vm\n";
+  cout<<"****************************************\n";  
+  total_cov.GetCorrelationMatrix().show_self(false);
+  cout<<"****************************************\n";  
+
+  inv=inv.inverse();
+
+  GroupData1D tmp(sens_size);
+  for(int i=0;i<sens_size;i++){
+    tmp.put_data(i,ce.GetValue(i)-1.0);
+  };
+  real kais=tmp*(inv*tmp);
+  cout<<"*    Kai square = "<<kais<<" ("<<kais/sens_size<<")\n";
+
+  // Only diagonal element of covariance matirx
+
+  GroupData2D tt(sens_size,sens_size);
+  for(int i=0;i<sens_size;i++){
+    tt.put_data(i,i,inv.get_dat(i,i));
+  };
+  real kais2=tmp*(tt*tmp);
+  cout<<"*    Kai square (diag) = "<<kais2<<" ("<<kais2/sens_size<<")\n";
+  cout<<"****************************************\n";  
+
+  GroupData1D kai(sens_size);
+  kai=xs_cov.GetCovariance()*(inv*tmp);
+  GroupData2D pgmg(sens_size,sens_size);
+  pgmg=xs_cov.GetCovariance()-xs_cov.GetCovariance()*(inv*xs_cov.GetCovariance());
+
+  cout<<"****************************************\n";
+  cout<<"* Adjustment\n";
+  cout<<"****************************************\n";
+  cout<<"* Posterior C/E values with XS-induced uncertainties\n";
+  cout<<"*\n";
+  for(int i=0;i<sens_size;i++){
+    cout<<"*  "<<sens_con.GetParameterList()->GetCoreTag(i);
+    cout<<","<<sens_con.GetParameterList()->GetCharaTag(i);
+    cout<<","<<sens_con.GetParameterList()->GetStepTag(i);
+    cout.setf(ios::showpoint);
+    cout.precision(5);
+    cout<<" : "<<ce.GetValue(i)-kai.get_dat(i);
+    cout<<" ("<<sqrt(pgmg.get_dat(i,i))<<")\n";
+    cout.unsetf(ios::showpoint);
+  };
+
+  pgmg=pgmg+cal_cov.GetCovariance("Relative")+exp_cov.GetCovariance("Relative");
+  pgmg=pgmg.inverse();
+
+  for(int i=0;i<sens_size;i++){
+    tmp.put_data(i,ce.GetValue(i)-1.0);
+  };
+  //real kaisp=(ce.GetValue()-kai)*(pgmg*(ce.GetValue()-kai));
+  real kaisp=(tmp-kai)*(pgmg*(tmp-kai));
+  cout<<"****************************************\n";
+  cout<<"*    Kai square = "<<kaisp<<" ("<<kaisp/sens_size<<")\n";
+  cout<<"****************************************\n";
+  //
+  vector<int> mmat;
+  vector<int> mmt;
+  int mmnn=0;
+  int cov_size=lib_cov.GetSize();
+  for(int i=0;i<cov_size;i++){
+    CrossSectionCovariance cov=lib_cov.GetCrossSectionCovariance(i);
+    int mat1=cov.GetMat1();
+    int mt1 =cov.GetMt1();
+    if(mmnn==0){
+      mmat.push_back(mat1);
+      mmt.push_back(mt1);
+      mmnn++;
+    }else{
+      bool exist=false;
+      for(int j=0;j<mmnn;j++){
+	if(mat1==mmat[j]&&mt1==mmt[j])exist=true;
+      };
+      if(!exist){
+	mmat.push_back(mat1);
+	mmt.push_back(mt1);
+	mmnn++;
+      };
+    };
+    int mat2=cov.GetMat2();
+    int mt2=cov.GetMt2();
+    bool exist=false;
+    for(int j=0;j<mmnn;j++){
+      if(mat2==mmat[j]&&mt2==mmt[j])exist=true;
+    };
+    if(!exist){
+      mmat.push_back(mat2);
+      mmt.push_back(mt2);
+      mmnn++;
+    };
+  };
+
+  vector< vector<GroupData1D> > tmpmat(mmnn);
+  for(int i=0;i<mmnn;i++){
+    tmpmat[i].resize(sens_size);
+    for(int j=0;j<sens_size;j++){
+      tmpmat[i][j].put_imax(grp);
+      tmpmat[i][j].set_zero();
+    };
+  };
+
+  for(int i=0;i<cov_size;i++){
+    CrossSectionCovariance cov=lib_cov.GetCrossSectionCovariance(i);
+    GroupData2D covdata=cov.GetCovariance("Relative");
+    int mat1=cov.GetMat1();
+    int mt1 =cov.GetMt1();
+    int mat2=cov.GetMat2();
+    int mt2 =cov.GetMt2();
+    int index1=-1;
+    int index2=-1;
+    for(int j=0;j<mmnn;j++){
+      if(mat1==mmat[j]&&mt1==mmt[j])index1=j;
+      if(mat2==mmat[j]&&mt2==mmt[j])index2=j;
+    };
+    for(int j=0;j<sens_size;j++){
+      int tmp1=sens_con.GetSensitivityData(j).FindData1D(mat1,mt1);
+      int tmp2=sens_con.GetSensitivityData(j).FindData1D(mat2,mt2);
+      if(index1!=-1&&tmp2!=-1){
+        tmpmat[index1][j]=tmpmat[index1][j]+
+	  covdata*sens_con.GetSensitivityData(j).GetSensitivity1D(tmp2);
+      };
+      if(index2!=-1&&tmp1!=-1&&index2!=index1){
+        tmpmat[index2][j]=tmpmat[index2][j]+
+	  covdata.GetTransposedMatrix()*sens_con.GetSensitivityData(j).GetSensitivity1D(tmp1);
+      };
+    };
+  };
+
+  cout<<"****************************************\n";
+  cout<<"* Change in cross section\n";
+  cout<<"****************************************\n";
+  GroupData1D ce_n1(sens_size);
+  for(int i=0;i<sens_size;i++){
+    ce_n1.put_data(i,1.-ce.GetValue().get_dat(i));
+  };
+  for(int i=0;i<mmnn;i++){ //
+    int mat=mmat[i];
+    int mt=mmt[i];
+    int fd=lib_cov.FindData(mat,mt,mat,mt);
+    int fd2=lib.FindData(mat,mt);
+    if(fd!=-1&&fd2!=-1){
+      cout<<"*  MAT: "<<mat<<"  MT: "<<mt<<"\n";
+      cout<<"*grp Upper Eng.  XS-Rel.Chg.  XS        Rel.Std.Dev.\n";
+      GroupData1D xschange(grp);
+      for(int j=0;j<grp;j++){
+        real tmp=0.;
+        for(int k=0;k<sens_size;k++){
+  	  tmp+=tmpmat[i][k].get_dat(j)*(inv*ce_n1).get_dat(k);
+        };
+        xschange.put_data(j,tmp);
+        real xs=lib.GetCrossSection(mat,mt).get_dat(j);
+        real stdev=lib_cov.GetCrossSectionCovariance(mat,mt,mat,mt).GetCovariance("Relative").get_diag().sqrt1d().get_dat(j);
+        printf("%3d %11.4e %10.5f %10.5f %10.5f\n",j,ebnd.get_dat(j),tmp,xs,stdev);
+      };
+      cout<<"****************************************\n";
+      cout<<" ( Affection to nuclear parameter )\n";
+      cout<<"*  MAT: "<<mat<<"  MT: "<<mt<<"\n";
+      for(int k=0;k<sens_size;k++){
+        int ttt=sens_con.GetSensitivityData(k).FindData1D(mat,mt);
+        if(ttt!=-1){
+	  real dce=sens_con.GetSensitivityData(k).GetSensitivity1D(ttt)*xschange;
+	  cout<<"    + "<<sens_con.GetParameterList()->GetCoreTag(k)<<" ";
+	  cout<<sens_con.GetParameterList()->GetCharaTag(k)<<" ";
+	  cout<<sens_con.GetParameterList()->GetStepTag(k)<<" ";
+	  cout<<dce<<"\n";
+	};
+      };
+      cout<<"\n";
+    };
+  };
+
+  /*
+  //MG(GMG+VE+VM)^{-1}
+  vector< vector<GroupData1D> > tmpmat2(ic);
+  for(int i=0;i<ic;i++){
+    tmpmat2[i].resize(is);
+    for(int j=0;j<is;j++){
+      tmpmat2[i][j].put_imax(grp);
+      tmpmat2[i][j].set_zero();
+      for(int k=0;k<grp;k++){
+	real tmp=0.;
+	for(int l=0;l<is;l++){
+	  tmp+=tmpmat[i][l].get_dat(k)*inv.get_dat(j,l);
+	};
+	tmpmat2[i][j].put_data(k,tmp);
+      }; 
+    };
+  };
+
+  cout<<"****************************************\n";
+  cout<<"* Reduction of standard deviation\n";
+  cout<<"****************************************\n";
+  cout<<"*                  (before  -> after)\n";
+  for(int ii=0;ii<ic;ii++){
+    cout<<"("<<mat[ii]<<":"<<mt[ii]<<")\n";
+    for(int i=0;i<grp;i++){
+      real tmp=0.;
+      for(int j=0;j<is;j++){
+        tmp+=tmpmat2[ii][j].get_dat(i)*tmpmat[ii][j].get_dat(i);
+      };
+      real var=GetXSCovMatrix(mat[ii],mt[ii],mat[ii],mt[ii],"relative").get_diag().get_dat(i);
+      real newvar=var-tmp;
+      printf("%3d %11.4e %10.5f %10.5f\n",i,ebnd.get_dat(i),sqrt(var),sqrt(newvar));
+    };
+  };
+  */
+};
+
+/*
+void UncertaintyCalculation::CondSensitivity(int cgrp, int *bgrp, string name)
+{
+  GroupData1D dummy(cgrp);
+  cout<<cgrp<<"\n";
+  for(int i=0;i<numsens;i++){
+    if(sensname[i]==name){
+      cout<<sensmat[i]<<"\n";
+      cout<<sensmt[i]<<"\n";
+      dummy.set_zero();
+      dummy=GetSensitivity1D(sensmat[i],sensmt[i],name).CondSum(cgrp,bgrp);
+      for(int j=0;j<cgrp;j++){
+	cout<<dummy.get_dat(j)<<"\n";
+      };
+    };
+  };
+};
+
+void UncertaintyCalculation::MixCrossSection
+(int mixn,int *matlist,string libname,real *weight,int newmat)
+{
+  ofstream fout;
+  fout.open("output",ios::out);
+  if(fout.fail()){
+    cout<<"Failed to open the file.\n";
+    exit(1);
+  };
+
+  fout<<grp<<"\n";
+
+  int mtn=6;
+  int mtlist[]={2,102,4,16,1,251};
+
+  real tmp=0.;
+  for(int i=0;i<mixn;i++){
+    tmp+=weight[i];
+  };
+  for(int i=0;i<mixn;i++){
+    weight[i]/=tmp;
+  };
+
+  for(int i=0;i<mtn;i++){
+    bool exist=true;
+    for(int j=0;j<mixn;j++){
+      if(!ExistCrossSection(matlist[j],mtlist[i],libname))exist=false;
+    };
+    if(exist){
+      fout<<newmat<<"\n";
+      fout<<mtlist[i]<<"\n";
+      GroupData1D tmp(grp);
+      GroupData1D tmp3(grp);
+      tmp.set_zero();
+      tmp3.set_zero();
+      for(int j=0;j<mixn;j++){
+	if(mtlist[i]!=251){
+	  tmp=tmp+GetCrossSection(matlist[j],mtlist[i],libname)*weight[j];
+	}else{
+	  GroupData1D tmp2(grp);
+	  tmp2=GetCrossSection(matlist[j],2,libname)*weight[j];
+	  tmp=tmp+GetCrossSection(matlist[j],mtlist[i],libname).mult(tmp2);
+	  tmp3=tmp3+tmp2;
+	};
+      };
+      if(mtlist[i]==251){
+	tmp=tmp/tmp3;
+      };
+      for(int i=0;i<grp;i++){
+	fout<<tmp.get_dat(i)<<"\n";
+      };
+    };
+  };
+  fout.close();
+};
+
+void UncertaintyCalculation::CovMultiply(real v,int mat,int mt)
+{
+  string mm;
+  for(int i=0;i<numcov;i++){
+    int mat1=XSCov[i].GetMat1();
+    int mt1 =XSCov[i].GetMt1();
+    int mat2=XSCov[i].GetMat2();
+    int mt2 =XSCov[i].GetMt2();
+    if(mat1==mat&&mt1==mt)XSCov[i].Multiply(v);
+    if(mat2==mat&&mt2==mt)XSCov[i].Multiply(v);
+  };
+};
+
+void UncertaintyCalculation::CovMultiply(real v,int mat,int mt,int g,string nn)
+{
+  int mats1,mts1,mats2,mts2;
+  string mm;
+  for(int i=0;i<icov;i++){
+    mats1=CovDat[i].GetMat1();
+    mts1 =CovDat[i].GetMt1();
+    mats2=CovDat[i].GetMat2();
+    mts2 =CovDat[i].GetMt2();
+    mm   =CovDat[i].GetName();
+    if(mats1==mat&&mts1==mt&&mm==nn){
+      int ig=CovDat[i].GetGrp();
+      for(int j=0;j<ig;j++){
+        real org=CovDat[i].GetCov().get_dat(g,j);
+	CovDat[i].GetCov().put_data(g,j,org*v);
+      };
+    };
+    if(mats2==mat&&mts2==mt&&mm==nn){
+      int ig=CovDat[i].GetGrp();
+      for(int j=0;j<ig;j++){
+	real org=CovDat[i].GetCov().get_dat(j,g);
+	CovDat[i].GetCov().put_data(j,g,org*v);
+      };
+    };
+  };
+};
+
+void DataSet::CondSensitivity(int cgrp, int *bgrp, char *name)
+{
+  cout<<cgrp<<"\n";
+  for(int i=0;i<isens;i++){
+    if(GetSensitivity1D(i).GetName()==name){
+      cout<<GetSensitivity1D(i).GetMat()<<"\n";
+      cout<<GetSensitivity1D(i).GetMt()<<"\n";
+      GetSensitivity1D(i).Cond(cgrp,bgrp);
+    };
+  };
+};
+
+void DataSet::ShowDiffLibrary(int mat,int mt,char *para1,char *para2)
+{
+  cout<<"*** Relative difference in cross section ***\n";
+  cout<<"   "<<para1<<" - "<<para2<<"\n";
+  cout<<"   (mat:"<<mat<<", mt:"<<mt<<")\n";
+  int ind1,ind2;
+  ind1=GetCrossSectionIndex(mat,mt,para1);
+  ind2=GetCrossSectionIndex(mat,mt,para2);
+  if(ind1==-1||ind2==-1)return;
+
+  int g1=GetCrossSection(ind1).GetGrp();
+  int g2=GetCrossSection(ind2).GetGrp();
+  if(g1!=g2)return;
+
+  for(int i=0;i<g1;i++){
+    real xs1=GetCrossSection(ind1).GetDAT().get_dat(i);
+    real xs2=GetCrossSection(ind2).GetDAT().get_dat(i);
+    printf("%11.4e  %11.5f\n",ebnd.get_dat(i),(xs1-xs2)/xs2);
+  };
+};
+*/
+
+void UncertaintyCalculation::ShowCrossSectionStandardDeviation(LibraryCovariance &libcov,int mat,int mt,bool excel)
+{
+  int id=libcov.FindData(mat,mt,mat,mt);
+  if(id==-1){
+    cout<<"# Warning!\n";
+    cout<<"# No variance information for mat/mt="<<mat<<"/"<<mt<<"\n";
+    exit(0);
+  };
+
+  cout<<"# Upper     Relative\n";
+  cout<<"# energy    standard Deviation\n";
+  cout.setf(ios::scientific);
+  cout.precision(5);
+  GroupData1D stddev=libcov.GetCrossSectionCovariance(mat,mt,mat,mt).GetStandardDeviation();
+  for(int i=0;i<grp;i++){
+    real e0=ebnd.get_dat(i);
+    real e1=ebnd.get_dat(i+1);
+    cout<<e0<<" "<<stddev.get_dat(i)<<"\n";
+    if(excel)cout<<e1<<" "<<stddev.get_dat(i)<<"\n";
+  };
+};
+
+void UncertaintyCalculation::PutCvalueFromSensitivity(SensitivityContainer &sens_con,Parameters &cal_val)
+{
+  int sz=sens_con.GetSize();
+  for(int i=0;i<sz;i++){
+    string core=sens_con.GetParameterList()->GetCoreTag(i);
+    string chara=sens_con.GetParameterList()->GetCharaTag(i);
+    int step=sens_con.GetParameterList()->GetStepTag(i);
+    real value=sens_con.GetSensitivityData(i).GetValue();
+    cal_val.PutValue(core,chara,value,step);
+  };
+};
+
+void UncertaintyCalculation::ShowCorrelationForXYPlot(LibraryCovariance &libcov,int mat,int mt)
+{
+  GroupData2D cor=libcov.GetCrossSectionCovariance(mat,mt,mat,mt).GetCorrelationMatrix();
+  
+  for(int i=0;i<grp;i++){
+    for(int k=0;k<2;k++){
+    for(int j=0;j<grp;j++){
+      real dat=cor.get_dat(i,j);
+      //if(i>=j)dat=0.;
+      cout<<ebnd.get_dat(i+k)<<" "<<ebnd.get_dat(j)<<" "<<dat<<"\n";
+      cout<<ebnd.get_dat(i+k)<<" "<<ebnd.get_dat(j+1)<<" "<<dat<<"\n";
+    };
+    cout<<"\n";
+    };
+  };
+};
+
+void UncertaintyCalculation::ShowCrossSectionUncertaintyComponentXYPlot
+(SensitivityContainer &sens_con, LibraryCovariance &lib_cov,
+ string core,string chara,int step,int mat1,int mt1,int mat2,int mt2, string filename)
+{
+  string outfile="./"+filename+"_"+IntToString(mat1)+"_"+IntToString(mt1);
+  if(mat2!=mat1||mt2!=mt2)outfile+="_"+IntToString(mat2)+"_"+IntToString(mt2);
+
+  int tmp=sens_con.GetParameterList()->FindData(core,chara,step);
+  if(tmp==-1){
+    cout<<"# Error in UncertaintyCalculation::ShowCrossSectionUncertaintyComponentXSPlot.\n";
+    cout<<"# There is no sensitivity data ...\n";
+    exit(0);
+  };
+  SensitivityData sens=sens_con.GetSensitivityData(core,chara,step);
+
+  int ids1=sens.FindData1D(mat1,mt1);
+  int ids2=sens.FindData1D(mat2,mt2);
+  if(ids1==-1||ids2==-1){
+    cout<<"# Error in UncertaintyCalculation::ShowCrossSectionUncertaintyComponentXSPlot.\n";
+    cout<<"# There is no sensitivity data ...\n";
+    exit(0);
+  };
+
+  int idcov=lib_cov.FindData(mat1,mt1,mat2,mt2);
+  if(idcov==-1){
+    cout<<"# Error in UncertaintyCalculation::ShowCrossSectionUncertaintyComponentXSPlot.\n";
+    cout<<"# There is no covariance data ("<<mat1<<","<<mt1<<"/"<<mat2<<","<<mt2<<"\n";
+    exit(0);
+  };
+
+  real totvar=CalCrossSectionUncertainty(sens_con,lib_cov,core,chara,step,1.,false);
+
+  GroupData1D s1=sens.GetSensitivity1D(ids1);
+  GroupData1D s2=sens.GetSensitivity1D(ids2);
+  GroupData2D cov=lib_cov.GetCrossSectionCovariance(idcov).GetCovariance("relative");
+
+  ShowCrossSectionUncertaintyComponentXYPlot(s1,s2,cov,totvar,outfile);
+};
+
+void UncertaintyCalculation::ShowCrossSectionUncertaintyComponentXYPlot
+(GroupData1D &s1, GroupData1D &s2, GroupData2D &covi, real factor, string outfile)
+{
+  GroupData2D cov(grp,grp);
+
+  for(int g=0;g<grp;g++){
+    for(int g2=0;g2<grp;g2++){
+      real org=covi.get_dat(g,g2);
+      cov.put_data(g,g2,org*s1.get_dat(g)*s2.get_dat(g2)*factor);
+    };
+  };
+
+  ofstream fout;
+  fout.open(outfile.data(),ios::out);
+  if(fout.fail()){
+    cout<<"# Error in UncertaintyCalculation::ShowCrossSectionUncertaintyComponentXSPlot.\n";
+    cout<<"# The following file cannot be open.\n";
+    cout<<"# file name : "<<outfile<<"\n";
+    exit(0);
+  };
+
+  for(int i=0;i<grp;i++){
+    for(int k=0;k<2;k++){
+    for(int j=0;j<grp;j++){
+      real dat=cov.get_dat(i,j);
+      fout<<ebnd.get_dat(i+k)<<" "<<ebnd.get_dat(j)<<" "<<dat<<"\n";
+      fout<<ebnd.get_dat(i+k)<<" "<<ebnd.get_dat(j+1)<<" "<<dat<<"\n";
+    };
+    fout<<"\n";
+    };
+  };
+  fout.close();
+
+};
+
+void UncertaintyCalculation::CalVarianceReductionFactor
+(SensitivityContainer &sens_con, LibraryCovariance &lib_cov,string core,string chara,int step,real mean)
+{
+  real para_var=CalCrossSectionUncertainty(sens_con,lib_cov,core,chara,step,1.,false);
+
+  int tmp=sens_con.GetParameterList()->FindData(core,chara,step);
+  if(tmp==-1){
+    cout<<"# Error in UncertaintyCalculation::MIMP.\n";
+    cout<<"# There is no sensitivity data ...\n";
+    exit(0);
+  };
+  SensitivityData sens=sens_con.GetSensitivityData(core,chara,step);
+
+  int sz=sens.GetSize1D();
+  for(int ii=0;ii<sz;ii++){
+    int mat=sens.GetMatList1D(ii);
+    int mt=sens.GetMtList1D(ii);
+    int id=lib_cov.FindData(mat,mt,mat,mt);
+    if(id!=-1){
+      GroupData2D cov=lib_cov.GetCrossSectionCovariance(id).GetCovariance("Relative");
+      vector<real> val(grp,0.);
+      for(int i1=0;i1<sz;i1++){
+        int mat1=sens.GetMatList1D(i1);
+        int mt1=sens.GetMtList1D(i1);
+        int id11=lib_cov.FindData(mat,mt,mat1,mt1);
+        int id12=lib_cov.FindData(mat1,mt1,mat,mt);
+        if(id11!=-1||id12!=-1){
+          GroupData2D cov1;
+          if(id11!=-1){
+  	    cov1=lib_cov.GetCrossSectionCovariance(id11).GetCovariance("Relative");
+	  }else{
+	    cov1=lib_cov.GetCrossSectionCovariance(id12).GetCovariance("Relative").GetTransposedMatrix();
+	  };
+          GroupData1D s1=sens.GetSensitivity1D(i1);
+          for(int i2=0;i2<sz;i2++){
+            int mat2=sens.GetMatList1D(i2);
+            int mt2=sens.GetMtList1D(i2);
+            int id21=lib_cov.FindData(mat,mt,mat2,mt2);
+            int id22=lib_cov.FindData(mat2,mt2,mat,mt);
+	    if(id21!=-1||id22!=-1){
+              GroupData2D cov2;
+              if(id21!=-1){
+  	        cov2=lib_cov.GetCrossSectionCovariance(id21).GetCovariance("Relative");
+	      }else{
+	        cov2=lib_cov.GetCrossSectionCovariance(id22).GetCovariance("Relative").GetTransposedMatrix();
+  	      };
+              GroupData1D s2=sens.GetSensitivity1D(i2);
+              for(int g=0;g<grp;g++){
+		real cv=cov.get_dat(g,g);
+		if(cv>0.){
+                  for(int g1=0;g1<grp;g1++){
+                    real s1v=s1.get_dat(g1);
+  	  	    for(int g2=0;g2<grp;g2++){
+		      val[g]+=s1v*s2.get_dat(g2)*cov1.get_dat(g,g1)*cov2.get_dat(g,g2)/cv;
+		    };
+		  };
+	        };
+	      };
+	    };
+	  };
+	};
+      };
+
+      bool print=false;
+      for(int g=0;g<grp;g++){
+	if(val[g]/para_var>mean)print=true;
+      };
+      if(print){
+        cout<<"# "<<mat<<"/"<<mt<<"\n";
+        for(int g=0;g<grp;g++){
+  	  //cout<<g<<" "<<val[g]<<" "<<sqrt(val[g])<<"\n";
+	  cout<<ebnd.get_dat(g)<<" "<<val[g]/para_var<<"\n";
+        };
+        cout<<"\n\n";
+      };
+    };
+  };
+
+};
+
+//+++(kawamoto)+++
+
+void UncertaintyCalculationForYieldDecay::CalFissionYieldUncertainty(SensitivityContainer sens_con,IndependentYieldCovariance cov,string core,string chara,int step){
+  MATIDTranslator midt;
+  SensitivityData sens_data;
+  sens_data=sens_con.GetSensitivityData(core,chara,step);
+  int fisnucnum=cov.GetFissionNuclideNumber();
+  
+  cout<<"********************************************************\n";
+  cout<<"* Fission yield-induced uncertainty\n";
+  cout<<"********************************************************\n";
+  cout<<"* Integral Data : core    "<<core<<"\n";
+  cout<<"*                 Chara.  "<<chara<<"\n";
+  cout<<"*                 step    "<<step<<"\n";
+  cout<<"********************************************************\n";
+
+  cout.setf(ios::scientific);
+  cout.precision(6);
+
+  real total=0;
+  for(int i=0;i<fisnucnum;i++){
+    int size=cov.GetSize(i);
+    string fisnucname=cov.GetFissionNuclideName(i);
+    GroupData1D G;
+    G.put_imax(size);
+    for(int j=0;j<size;j++){
+      int mat=cov.GetID(i,j);
+      int mt=18000000+midt.ID(fisnucname);
+      int data=sens_data.FindData0D(mat,mt);
+      if(data==-1){
+	G.put_data(j,0.);
+      }else{
+	real tmp1=sens_data.GetSensitivity0D(data);
+	real tmp2=tmp1;
+	G.put_data(j,tmp2);
+      };
+    };
+
+    GroupData2D M=cov.GetCovarianceMatrix(i);
+    M.ReducedForm();
+    real unc=G*(M*G);
+
+    cout<<"*  Fission Yield from "<<fisnucname<<"    "<<unc<<" ( "<<sqrt(unc)<<" )\n";
+    total=total+unc;
+  };
+  
+  cout<<"********************************************************\n";
+  cout<<"* Total uncertainty "<<total<<" ( "<<sqrt(total)<<" )\n";
+  cout<<"********************************************************\n";
+};
+
+void UncertaintyCalculationForYieldDecay::CalFissionYieldUncertaintyDetail(SensitivityContainer sens_con,IndependentYieldCovariance cov,string core,string chara,int step,real mean){
+  MATIDTranslator midt;
+  SensitivityData sens_data;
+  sens_data=sens_con.GetSensitivityData(core,chara,step);
+  int fisnucnum=cov.GetFissionNuclideNumber();
+  
+  cout<<"********************************************************\n";
+  cout<<"* Fission yield-induced uncertainty\n";
+  cout<<"********************************************************\n";
+  cout<<"* Integral Data : core    "<<core<<"\n";
+  cout<<"*                 Chara.  "<<chara<<"\n";
+  cout<<"*                 step    "<<step<<"\n";
+  cout<<"********************************************************\n";
+
+  cout.setf(ios::scientific);
+  cout.precision(6);
+
+  real total=0;
+  for(int i=0;i<fisnucnum;i++){
+    int size=cov.GetSize(i);
+    GroupData2D M=cov.GetCovarianceMatrix(i);
+    
+    for(int j=0;j<size;j++){
+      real tmp=M.get_dat(j,j);
+      if(tmp<0.)cout<<tmp<<"\n";
+    };
+
+    M.ReducedForm();
+    string fisnucname=cov.GetFissionNuclideName(i);
+    for(int ii=1;ii<300;ii++){
+      int mass_counter=0;
+      vector<real> mini_G_tmp;
+      vector<int> mini_id;
+      vector<int> mini_position;
+      for(int j=0;j<size;j++){
+	int mat=cov.GetID(i,j);
+	int lz,la,li;
+	midt.GetParameter(mat,lz,la,li);
+	if(ii==la){
+	  mass_counter++;
+	  mini_id.push_back(mat);
+	  mini_position.push_back(j);
+	  int mt=18000000+midt.ID(fisnucname);
+	  int data=sens_data.FindData0D(mat,mt);
+	  if(data==-1){
+	    mini_G_tmp.push_back(0.);
+	  }else{
+	    real tmp1=sens_data.GetSensitivity0D(data);
+	    real tmp2=tmp1;
+	    mini_G_tmp.push_back(tmp2);
+	  };
+	};
+      };
+
+      if(mass_counter!=0){
+	GroupData1D mini_G;
+	GroupData2D mini_cov;
+	mini_cov.put_yx(mass_counter,mass_counter);
+	mini_G.put_imax(mass_counter);
+	for(int iii=0;iii<mass_counter;iii++){
+	  mini_G.put_data(iii,mini_G_tmp[iii]);
+	  for(int iiii=0;iiii<mass_counter;iiii++){
+	    mini_cov.put_data(iii,iiii,M.get_dat(mini_position[iii],mini_position[iiii]));
+	  };
+	};
+	real vali=mini_G*(mini_cov*mini_G);
+	if(sqrt(vali)>=mean){
+	  cout<<"* "<<fisnucname<<" A="<<ii<<" Mass Chain: "<<vali<<" ( "<<sqrt(vali)<<" ) \n";
+	};
+	total=total+vali;
+      };
+    };
+  }; 
+  cout<<"********************************************************\n";
+  cout<<"* Total uncertainty "<<total<<" ( "<<sqrt(total)<<" )\n";
+  cout<<"********************************************************\n";
+
+};
+
+void UncertaintyCalculationForYieldDecay::CalDecayEnergyUncertainty(SensitivityContainer sens_con,DecayEnergyCovariance cov,string core,string chara,int step){  
+  MATIDTranslator midt;
+  SensitivityData sens_data;
+  sens_data=sens_con.GetSensitivityData(core,chara,step);
+  
+  cout<<"********************************************************\n";
+  cout<<"* Decay energy-induced uncertainty\n";
+  cout<<"********************************************************\n";
+  cout<<"* Integral Data : core    "<<core<<"\n";
+  cout<<"*                 Chara.  "<<chara<<"\n";
+  cout<<"*                 step    "<<step<<"\n";
+  cout<<"********************************************************\n";
+
+  cout.setf(ios::scientific);
+  cout.precision(6);
+
+  real total=0;
+  for(int i=0;i<3;i++){
+    int size=cov.GetSize();
+    GroupData1D G;
+    G.put_imax(size);
+    for(int j=0;j<size;j++){
+      int mat=cov.GetID(j);
+      int mt=99990+i;
+      int data=sens_data.FindData0D(mat,mt);
+      if(data==-1){
+	G.put_data(j,0.);
+      }else{
+	real tmp1=sens_data.GetSensitivity0D(data);
+	real tmp2=tmp1;
+	G.put_data(j,tmp2);
+      };
+    };
+    GroupData2D M=cov.GetCovarianceMatrix(i);
+    M.ReducedForm();
+    real unc=G*(M*G);
+
+    string type;
+    if(i==0)type=" Beta";
+    if(i==1)type="Ganma";
+    if(i==2)type="Alpha";
+    
+    cout<<"* "<<type<<" decay energy: "<<unc<<" ( "<<sqrt(unc)<<" )\n";
+    total=total+unc;
+};
+  cout<<"********************************************************\n";
+  cout<<"* Total uncertainty "<<total<<" ( "<<sqrt(total)<<" )\n";
+  cout<<"********************************************************\n";
+  
+};
+
+void UncertaintyCalculationForYieldDecay::CalDecayEnergyUncertaintyDetail(SensitivityContainer sens_con,DecayEnergyCovariance cov,string core,string chara,int step,real mean){
+
+  MATIDTranslator midt;
+  SensitivityData sens_data;
+  sens_data=sens_con.GetSensitivityData(core,chara,step);
+  
+  cout<<"********************************************************\n";
+  cout<<"* Decay energy-induced uncertainty\n";
+  cout<<"********************************************************\n";
+  cout<<"* Integral Data : core    "<<core<<"\n";
+  cout<<"*                 Chara.  "<<chara<<"\n";
+  cout<<"*                 step    "<<step<<"\n";
+  cout<<"********************************************************\n";
+
+  cout.setf(ios::scientific);
+  cout.precision(6);
+
+  real total=0;
+  for(int i=0;i<3;i++){
+    int size=cov.GetSize();
+    GroupData2D M=cov.GetCovarianceMatrix(i);
+    M.ReducedForm();
+    for(int j=0;j<size;j++){
+      int mat=cov.GetID(j);
+      int mt=99990+i;
+      int data=sens_data.FindData0D(mat,mt);
+      real tmp;
+      if(data==-1){
+	tmp=0.;
+      }else{
+	real tmp1=sens_data.GetSensitivity0D(data);
+	tmp=tmp1;
+      };
+      real sd=sqrt(M.get_dat(j,j));
+      real vali=tmp*tmp*M.get_dat(j,j);
+      string type;
+      if(i==0)type=" Beta";
+      if(i==1)type="Gamma";
+      if(i==2)type="Alpha";      
+      if(sqrt(vali)>=mean){
+	cout<<"* "<<midt.GetName(mat)<<" "<<type<<" decay energy (Error: "<<sd<<"): "<<vali<<" ( "<<sqrt(vali)<<" )\n";
+      };
+      total+=vali;
+    };
+};
+  cout<<"********************************************************\n";
+  cout<<"* Total uncertainty "<<total<<" ( "<<sqrt(total)<<" )\n";
+  cout<<"********************************************************\n";
+
+};
+
+void UncertaintyCalculationForYieldDecay::CalHalfLifeUncertainty(SensitivityContainer sens_con,HalfLifeCovariance cov,string core,string chara,int step){
+
+  MATIDTranslator midt;
+  SensitivityData sens_data;
+  sens_data=sens_con.GetSensitivityData(core,chara,step);
+  
+  cout<<"********************************************************\n";
+  cout<<"* Half life-induced uncertainty\n";
+  cout<<"********************************************************\n";
+  cout<<"* Integral Data : core    "<<core<<"\n";
+  cout<<"*                 Chara.  "<<chara<<"\n";
+  cout<<"*                 step    "<<step<<"\n";
+  cout<<"********************************************************\n";
+  
+  cout.setf(ios::scientific);
+  cout.precision(6);
+  
+  int size=cov.GetSize();
+  GroupData1D G;
+  G.put_imax(size);
+  
+  for(int j=0;j<size;j++){
+    real sns_total;
+    int mat=cov.GetID(j);
+    int data=sens_data.FindData0D(mat,8888);
+    if(data==-1){
+      sns_total=0.;
+    }else{
+      real tmp1=sens_data.GetSensitivity0D(data);
+      sns_total=tmp1;
+    };
+    G.put_data(j,sns_total);
+  };
+  GroupData2D M=cov.GetCovarianceMatrix();
+  M.ReducedForm();
+  real unc=G*(M*G);
+
+  cout<<"* Total uncertainty from half life "<<unc<<" ( "<<sqrt(unc)<<" )\n";
+  cout<<"********************************************************\n";
+
+};
+
+void UncertaintyCalculationForYieldDecay::CalHalfLifeUncertaintyDetail(SensitivityContainer sens_con,HalfLifeCovariance cov,string core,string chara,int step,real mean){
+
+  MATIDTranslator midt;
+  SensitivityData sens_data;
+  sens_data=sens_con.GetSensitivityData(core,chara,step);
+  
+  cout<<"********************************************************\n";
+  cout<<"* Half life-induced uncertainty\n";
+  cout<<"********************************************************\n";
+  cout<<"* Integral Data : core    "<<core<<"\n";
+  cout<<"*                 Chara.  "<<chara<<"\n";
+  cout<<"*                 step    "<<step<<"\n";
+  cout<<"********************************************************\n";
+  
+  cout.setf(ios::scientific);
+  cout.precision(6);
+  
+  int size=cov.GetSize();
+  real total=0.;
+  GroupData2D M=cov.GetCovarianceMatrix();
+  M.ReducedForm();
+  for(int j=0;j<size;j++){
+    real sns_total;
+    int mat=cov.GetID(j);
+    int data=sens_data.FindData0D(mat,8888);
+    if(data==-1){
+      sns_total=0.;
+    }else{
+      real tmp1=sens_data.GetSensitivity0D(data);
+      sns_total=tmp1;
+    };
+    real sd=sqrt(M.get_dat(j,j));
+    real vali=sns_total*sns_total*M.get_dat(j,j);
+    if(sqrt(vali)>=mean){
+      cout<<"* "<<midt.GetName(mat)<<" Half Life (Error: "<<sd<<"): "<<vali<<" ( "<<sqrt(vali)<<" ) \n";
+    };
+    total+=vali;
+  };
+
+  cout<<"********************************************************\n";
+  cout<<"* Total uncertainty from half life "<<total<<" ( "<<sqrt(total)<<" )\n";
+  cout<<"********************************************************\n";
+
+};
+
+void UncertaintyCalculationForYieldDecay::CalBranchingRatioUncertainty(SensitivityContainer sens_con,BranchingRatioCovariance cov,string core,string chara,int step){
+  MATIDTranslator midt;
+  SensitivityData sens_data;
+  sens_data=sens_con.GetSensitivityData(core,chara,step);
+  
+  cout<<"********************************************************\n";
+  cout<<"* Branching ratio-induced uncertainty\n";
+  cout<<"********************************************************\n";
+  cout<<"* Integral Data : core    "<<core<<"\n";
+  cout<<"*                 Chara.  "<<chara<<"\n";
+  cout<<"*                 step    "<<step<<"\n";
+  cout<<"********************************************************\n";
+  
+  cout.setf(ios::scientific);
+  cout.precision(6);
+  
+  int size=cov.GetSize();
+  int nucnum=cov.GetNucNum();
+  GroupData1D G;
+  G.put_imax(size);
+  
+  int counter=0;
+  for(int j=0;j<nucnum;j++){
+    int mat=cov.GetID(j);    
+    int channel=cov.GetChannel(j);
+    for(int i=0;i<channel;i++){
+      int mt=88880+i;
+      int data=sens_data.FindData0D(mat,mt);
+      real sns;
+      if(data==-1){
+	sns=0.;
+      }else{
+	real tmp=sens_data.GetSensitivity0D(data);
+	sns=tmp;
+      };
+      G.put_data(counter,sns);
+      counter++;
+    };
+  };
+  GroupData2D M=cov.GetCovarianceMatrix();
+  M.ReducedForm();
+  real unc=G*(M*G);
+  
+  cout<<"* Total uncertainty from branching ratio "<<unc<<" ( "<<sqrt(unc)<<" )\n";
+  cout<<"********************************************************\n";
+
+};
+
+void UncertaintyCalculationForYieldDecay::CalBranchingRatioUncertaintyDetail(SensitivityContainer sens_con,BranchingRatioCovariance cov,string core,string chara,int step,real mean){
+  MATIDTranslator midt;
+  SensitivityData sens_data;
+  sens_data=sens_con.GetSensitivityData(core,chara,step);
+  
+  cout<<"********************************************************\n";
+  cout<<"* Branching ratio-induced uncertainty\n";
+  cout<<"********************************************************\n";
+  cout<<"* Integral Data : core    "<<core<<"\n";
+  cout<<"*                 Chara.  "<<chara<<"\n";
+  cout<<"*                 step    "<<step<<"\n";
+  cout<<"********************************************************\n";
+  
+  cout.setf(ios::scientific);
+  cout.precision(6);
+  
+  int nucnum=cov.GetNucNum();
+  real total=0.;
+  int counter=0;
+  GroupData2D M=cov.GetCovarianceMatrix();
+  M.ReducedForm();
+
+  for(int j=0;j<nucnum;j++){
+    int mat=cov.GetID(j);
+    int channel=cov.GetChannel(j);
+    for(int i=0;i<channel;i++){
+      int mt=88880+i;
+      int data=sens_data.FindData0D(mat,mt);
+      real sns;
+      if(data==-1){
+	sns=0.;
+      }else{
+	real tmp=sens_data.GetSensitivity0D(data);
+	sns=tmp;
+      };
+      real sd=sqrt(M.get_dat(counter,counter));
+      real vali=sns*sns*M.get_dat(counter,counter);
+      if(sqrt(vali)>=mean){
+	cout<<"* "<<midt.GetName(mat)<<" Branching Ratio No."<<i<<" (Error: "<<sd<<"): "<<vali<<" ( "<<sqrt(vali)<<" ) \n";
+      };
+      total+=vali;
+      counter++;
+    };
+  };
+
+  cout<<"********************************************************\n";
+  cout<<"* Total uncertainty from branching ratio "<<total<<" ( "<<sqrt(total)<<" )\n";
+  cout<<"********************************************************\n";
+
+};
+
+GroupData2D UncertaintyCalculationForYieldDecay::GetFissionYieldGMG(SensitivityContainer sens_con,IndependentYieldCovariance cov,int chara_num,string *core,string *chara,int *step){
+  MATIDTranslator midt;
+ 
+  GroupData2D gmg_total;
+  gmg_total.put_yx(chara_num,chara_num);
+  gmg_total.set_zero();
+
+  int fisnucnum=cov.GetFissionNuclideNumber();
+
+  for(int i=0;i<fisnucnum;i++){
+    int size=cov.GetSize(i);
+    string fisnucname=cov.GetFissionNuclideName(i);
+    GroupData2D G;
+    G.put_yx(chara_num,size);
+    for(int k=0;k<chara_num;k++){
+      SensitivityData sens_data;
+      sens_data=sens_con.GetSensitivityData(core[k],chara[k],step[k]);
+      for(int j=0;j<size;j++){
+	int mat=cov.GetID(i,j);
+	int mt=18000000+midt.ID(fisnucname);
+	int data=sens_data.FindData0D(mat,mt);
+	if(data==-1){
+	  G.put_data(k,j,0.);
+	}else{
+	  real tmp1=sens_data.GetSensitivity0D(data);
+	  real tmp2=tmp1;
+	  G.put_data(k,j,tmp2);
+	};
+      };
+    };
+
+    GroupData2D M=cov.GetCovarianceMatrix(i);
+    M.ReducedForm();
+    GroupData2D gmg=(G*M)*G.T();
+
+    gmg_total=gmg_total+gmg;
+  };
+
+  return gmg_total;  
+};
+
+GroupData2D UncertaintyCalculationForYieldDecay::GetDecayEnergyGMG(SensitivityContainer sens_con,DecayEnergyCovariance cov,int chara_num,string *core,string *chara,int *step){
+  MATIDTranslator midt;
+ 
+  GroupData2D gmg_total;
+  gmg_total.put_yx(chara_num,chara_num);
+  gmg_total.set_zero();
+
+  for(int i=0;i<3;i++){
+    int size=cov.GetSize();
+    GroupData2D G;
+    G.put_yx(chara_num,size);
+    for(int k=0;k<chara_num;k++){
+      SensitivityData sens_data;
+      sens_data=sens_con.GetSensitivityData(core[k],chara[k],step[k]);
+      for(int j=0;j<size;j++){
+	int mat=cov.GetID(j);
+	int mt=99990+i;
+	int data=sens_data.FindData0D(mat,mt);
+	if(data==-1){
+	  G.put_data(k,j,0.);
+	}else{
+	  real tmp1=sens_data.GetSensitivity0D(data);
+	  real tmp2=tmp1;
+	  G.put_data(k,j,tmp2);
+	};
+      };
+    };
+    GroupData2D M=cov.GetCovarianceMatrix(i);
+    M.ReducedForm();
+    GroupData2D gmg=(G*M)*G.T();
+    gmg_total=gmg_total+gmg;
+  };
+
+  return gmg_total;  
+};
+
+GroupData2D UncertaintyCalculationForYieldDecay::GetHalfLifeGMG(SensitivityContainer sens_con,HalfLifeCovariance cov,int chara_num,string *core,string *chara,int *step){
+  MATIDTranslator midt;
+ 
+  int size=cov.GetSize();
+  GroupData2D G;
+  G.put_yx(chara_num,size);
+
+  for(int k=0;k<chara_num;k++){
+    SensitivityData sens_data;
+    sens_data=sens_con.GetSensitivityData(core[k],chara[k],step[k]);
+    for(int j=0;j<size;j++){
+      real sns_total;
+      int mat=cov.GetID(j);
+      int data=sens_data.FindData0D(mat,8888);
+      if(data==-1){
+	sns_total=0.;
+      }else{
+	real tmp1=sens_data.GetSensitivity0D(data);
+	sns_total=tmp1;
+      };
+      G.put_data(k,j,sns_total);
+    };
+  };
+  GroupData2D M=cov.GetCovarianceMatrix();
+  M.ReducedForm();
+  GroupData2D gmg=(G*M)*G.T();
+
+  return gmg;  
+};
+
+GroupData2D UncertaintyCalculationForYieldDecay::GetBranchingRatioGMG(SensitivityContainer sens_con,BranchingRatioCovariance cov,int chara_num,string *core,string *chara,int *step){
+  MATIDTranslator midt;
+ 
+  int size=cov.GetSize();
+  int nucnum=cov.GetNucNum();
+  GroupData2D G;
+  G.put_yx(chara_num,size);
+  
+  for(int k=0;k<chara_num;k++){
+    SensitivityData sens_data;
+    sens_data=sens_con.GetSensitivityData(core[k],chara[k],step[k]);
+    int counter=0;
+    for(int j=0;j<nucnum;j++){
+      int mat=cov.GetID(j);
+      int channel=cov.GetChannel(j);
+      for(int i=0;i<channel;i++){
+	int mt=88880+i;
+	int data=sens_data.FindData0D(mat,mt);
+	real sns;
+	if(data==-1){
+	  sns=0.;
+	}else{
+	  real tmp=sens_data.GetSensitivity0D(data);
+	  sns=tmp;
+	};
+	G.put_data(k,counter,sns);
+	counter++;
+      };
+    };
+  };
+  GroupData2D M=cov.GetCovarianceMatrix();
+  M.ReducedForm();
+  GroupData2D gmg=(G*M)*G.T();
+
+  return gmg;  
+
+};

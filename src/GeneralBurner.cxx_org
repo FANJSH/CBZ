@@ -1,0 +1,1186 @@
+#include <cstdlib>
+#include "GeneralBurner.h"
+
+GeneralBurner::GeneralBurner()
+{
+  up_scattering=false;
+  input_flux_level=false;
+  sub_step_org=20; 
+  burn_time_calc=false;
+  pl0_calc=false;
+};
+
+
+void GeneralBurner::SetLibrary(string cbglibdir,string lib,int fp_num,string *fp_nuc)
+{
+  up_scattering=true;
+  PutGroup(107);
+
+  string libdir=cbglibdir;
+  if(lib=="jendl-3.3"){
+    libdir=libdir+"CBGLIB/j33.107g.iwt7/";
+  }else if(lib=="jendl-4.0"){
+    libdir=libdir+"CBGLIB/j4.107g.iwt7/";
+  }else if(lib=="jendl-4.0_iwt4"){
+    libdir=libdir+"CBGLIB/j4.107g.iwt4/";
+  }else if(lib=="endf-7.1"){
+    libdir=libdir+"CBGLIB/e71.107g.iwt7/";
+  }else if(lib=="jeff-3.1.1"){
+    libdir=libdir+"CBGLIB/jf311.107g.iwt7/";
+  }else if(lib=="jeff-3.2"){
+    libdir=libdir+"CBGLIB/jf32.107g.iwt7/";
+  }else{
+    cout<<"# Error in GeneralBurner::SetLibrary.\n";
+    cout<<"# Library "<<lib<<" does not exist.\n";
+    exit(0);
+  };
+
+  xslib.Initialize(libdir,"N-ENERGY");
+  string filename_hm[]={
+    // (Heavy nuclides : 21 nuclides)
+    /*
+    //"U234.T2","U235.U8","U236.T2","U237","U238.mix",
+    "U234.U8","U235.U8","U236.U8","U237","U238.mix",
+    "Np237","Np239","Pu238.U8","Pu239.mix","Pu240.mix",
+    "Pu241.mix","Pu242.mix","Am241.mix","Am242","Am242m",
+    //"Am243.U8","Cm242","Cm243","Cm244.U8_20170408","Cm245.U8",
+    "Am243.U8","Cm242","Cm243","Cm244.U8","Cm245.U8",
+    "Cm246",
+    */
+    // (replaced in 2021/8/9)
+    "U234.U8R","U235.U8R","U236.U8R","U237","U238.mixR",
+    "Np237","Np239","Pu238.U8R","Pu239.mixR","Pu240.mixR",
+    "Pu241.mixR","Pu242.mixRR","Am241.mixR","Am242","Am242m",    
+    "Am243.U8R","Cm242","Cm243","Cm244.U8R","Cm245.U8R",
+    "Cm246",    
+  };
+  string filename_str[]={
+    // (light or medium-heavy nuclides : 11 nuclides)
+    "O016","Zr000","H001","B010","Fe000",
+    "Cr000","Ni000","B011","Co059","Mn055",
+    "C000","Sn000"
+  };
+
+  xslib.ReadFile(21,libdir,filename_hm);
+  xslib.ReadFile(fp_num,libdir,fp_nuc);
+  xslib.ReadFile(12,libdir,filename_str);
+
+  //string filename_tmp[]={"Pu238.U8"};
+  //xslib.ReadFile(1,"../../CBGLIB/j33.107g.iwt7/",filename_tmp);
+
+
+  // (thermal data)
+  string libth=libdir;
+  libth.append("Thermal/");
+  xslib.GetLibData(10010).GetThScat().ReadFile(libth,"H.H2O");
+  xslib.GetLibData(80160).GetThScat().ReadFile(libth,"O");
+  xslib.GetLibData(922350).GetThScat().ReadFile(libth,"U235");
+  xslib.GetLibData(922380).GetThScat().ReadFile(libth,"U238");
+  xslib.GetLibData(942390).GetThScat().ReadFile(libth,"Pu239");
+  xslib.GetLibData(942400).GetThScat().ReadFile(libth,"Pu240");
+  xslib.GetLibData(942410).GetThScat().ReadFile(libth,"Pu241");
+  xslib.GetLibData(942420).GetThScat().ReadFile(libth,"Pu242");          
+
+  // (Bell factor-optimization)
+  string belldir=cbglibdir+"CBGLIB/Bell-107g/";
+  xslib.ReadBellFactor(belldir,"U235.900K",922350);
+  xslib.ReadBellFactor(belldir,"U238.900K",922380);
+  xslib.ReadBellFactor(belldir,"Pu239.900K",942390);
+  xslib.ReadBellFactor(belldir,"Pu240.900K",942400);
+  xslib.ReadBellFactor(belldir,"Pu241.900K",942410);
+  xslib.ReadBellFactor(belldir,"Pu242.900K",942420);
+
+  /*
+  for(int i=0;i<107;i++){
+    real e0=xslib.GetEnband().get_dat(i);
+    if(e0<100.)xslib.GetLibData(922380).PutBellFactor(i,1.2);
+    //cout<<xslib.GetEnband().get_dat(i)<<" ";    
+    //cout<<xslib.GetLibData(922380).GetBellFactor(i)<<"\n";
+  };
+  //exit(0);
+  */
+  
+  //xslib.GetLibData(430990).PutBellFactorAllGroup(1.2);
+  //xslib.GetLibData(430990).PutBellFactor(57, 1.5);  
+  //xslib.GetLibData(621520).PutBellFactorAllGroup(1.2);
+  //xslib.GetLibData(621520).PutBellFactor(56, 1.0);
+
+  //cout<<xslib.GetLibData(942420).GetBellFactor(60)<<"\n"; exit(0);
+  //xslib.GetLibData(942420).PutBellFactor(60, 1.5);    
+
+
+  // +++ multiple R-perameter for Cm-244 and U-238 / Cm-244 and Pu-239.
+  XSLibrary xslib2;
+  xslib2.Initialize(libdir,"N-ENERGY");
+  
+  string fname[]={
+    "Cm244.P9R","U238.P0R","Pu239.U8R","Pu239.P1R","Pu239.P0R",
+    "Cm244.U5R","Pu240.P9R",
+    "Cm244.Sm2R","Sm152.C4R","Tc099.U5R",
+    "Pu242.P8RR",
+    //"Pu242.P9RR","Pu242.P0RR","Pu242.P1RR","Pu242.U5RR",
+    // "Tc099.A1R",
+    // "Sm152.P9R","Sm152.S1R",
+    //"Pu242.P8R"
+  };    
+  int idtmp[]={10,1,2,3,4, 5,6, 9,11,12, 13};
+  //int idtmp[]={10,1,2,3,4, 5,6, 9,11,12, 13, 14,15,16,17};  
+  xslib2.ReadFile(5+2+3+1,libdir,fname,idtmp);      
+
+  // (Cm-244)
+  xslib.GetLibData(962440).GetFtable().AddData(xslib2.GetLibData(10).GetFtable(),56); // w Pu-239
+  xslib.GetLibData(962440).GetFtable().AddData(xslib2.GetLibData(5).GetFtable(),56);  // w U-235
+  xslib.GetLibData(962440).GetFtable().AddData(xslib2.GetLibData(9).GetFtable(),56);  // w Sm-152  
+
+  // (U-238)
+  xslib.GetLibData(922380).GetFtable().AddData(xslib2.GetLibData(1).GetFtable(),47);  // w Pu-240
+
+  // (Pu-239)
+  xslib.GetLibData(942390).GetFtable().AddData(xslib2.GetLibData(2).GetFtable(),49);  // w U-238
+  xslib.GetLibData(942390).GetFtable().AddData(xslib2.GetLibData(3).GetFtable(),52);  // w Pu-241
+  xslib.GetLibData(942390).GetFtable().AddData(xslib2.GetLibData(4).GetFtable(),52);  // w Pu-240
+
+  // (Pu-242)
+  xslib.GetLibData(942420).GetFtable().AddData(xslib2.GetLibData(13).GetFtable(),60);  // w Pu-238
+  //xslib.GetLibData(942420).GetFtable().AddData(xslib2.GetLibData(14).GetFtable(),60);  // w Pu-239
+  //xslib.GetLibData(942420).GetFtable().AddData(xslib2.GetLibData(15).GetFtable(),60);  // w Pu-239
+  //xslib.GetLibData(942420).GetFtable().AddData(xslib2.GetLibData(16).GetFtable(),60);  // w Pu-239
+  //xslib.GetLibData(942420).GetFtable().AddData(xslib2.GetLibData(17).GetFtable(),60);  // w Pu-239  
+
+  // (Sm-152) The following RI treatment has very small effects on Sm-152 ND
+  /*
+  xslib.GetLibData(621520).GetFtable().AddData(xslib2.GetLibData(11).GetFtable(),56); // w Cm-244
+  xslib.GetLibData(621520).GetFtable().AddData(xslib2.GetLibData(14).GetFtable(),56); // w Pu-239
+  xslib.GetLibData(621520).GetFtable().AddData(xslib2.GetLibData(15).GetFtable(),56); // w Sm-151
+  */
+  
+  // (Tc-99)
+  xslib.GetLibData(430990).GetFtable().AddData(xslib2.GetLibData(12).GetFtable(),57); // w U-235
+  //xslib.GetLibData(430990).GetFtable().AddData(xslib2.GetLibData(13).GetFtable(),57); // w Am-241
+  /*
+  xslib.GetLibData(942400).GetFtable().AddData(xslib2.GetLibData(6).GetFtable(),66); // w Pu-240
+  xslib.GetLibData(942400).GetFtable().AddData(xslib2.GetLibData(6).GetFtable(),67); // w Pu-240
+  */
+};
+
+void GeneralBurner::SetLibrary(string cbglibdir,string lib)
+{
+  int fp_num=185+1;
+  string filename_fp[]={
+    // (Fission products : 185+1 nuclides)
+    "Ge073","Ge074","Ge076","As075","Se076",
+    "Se077","Se078","Se079","Se080","Se082",
+    "Br081","Kr082","Kr083","Kr084","Kr085",
+    "Kr086","Rb085","Rb086","Rb087","Sr086",
+    "Sr087","Sr088","Sr089","Sr090","Y089",
+    "Y090","Y091","Zr090","Zr091","Zr092",
+    "Zr093","Zr094","Zr095","Zr096","Nb093",
+    "Nb094","Nb095","Mo092","Mo094","Mo095",
+    "Mo096","Mo097","Mo098","Mo099","Mo100",
+    "Tc099.U8R","Ru100","Ru101","Ru102","Ru103", // !
+    "Ru104","Ru105","Ru106","Rh103","Rh105",
+    "Pd104","Pd105","Pd106","Pd107","Pd108.T2",  // !
+    "Pd110","Ag107","Ag109.T2","Ag110m","Cd110", // !
+    "Cd111","Cd112","Cd113","Cd114","Cd116",
+    "In113","In115","Sn116","Sn117","Sn118",
+    "Sn119","Sn120","Sn122","Sn123","Sn124",
+    "Sn126","Sb121","Sb123","Sb124","Sb125",
+    "Sb126","Te122","Te123","Te124","Te125",
+    "Te126","Te127m","Te128","Te129m","Te130",
+    "Te132","I127","I129","I130","I131",
+    "I135","Xe126","Xe128","Xe129","Xe130",
+    "Xe131.T2","Xe132","Xe133","Xe134","Xe135", // !
+    "Xe136","Cs133.T2","Cs134","Cs135","Cs136", // !
+    "Cs137","Ba134","Ba135","Ba136","Ba137",
+    "Ba138","Ba140","La139","La140","Ce140",
+    "Ce141","Ce142","Ce143","Ce144","Pr141",
+    "Pr143","Nd142","Nd143","Nd144","Nd145",
+    "Nd146","Nd147","Nd148","Nd150","Pm147",
+    "Pm148","Pm148m","Pm149","Pm151","Sm147",
+    "Sm148","Sm149","Sm150.T2","Sm151.U8R","Sm152.U8R", // !
+    "Sm153","Sm154","Eu151","Eu152","Eu153.T2", // !
+    "Eu154","Eu155","Eu156","Eu157","Gd152",
+    "Gd154","Gd155","Gd156","Gd157","Gd158",
+    "Gd160","Tb159","Tb160","Dy160","Dy161",
+    "Dy162","Dy163","Dy164","Ho165","Er162",
+    "Er164","Er166","Er167","Er168","Er170",
+    "Hf176","Hf177","Hf178","Hf179","Hf180",
+    "Gd153",
+  };
+  SetLibrary(cbglibdir,lib,fp_num,filename_fp);
+
+  // (perturbation)
+  /*
+  int mat=922380;
+  for(int g=0;g<107;g++){
+    real org=xslib.GetLibData(mat).GetXSData().GetData1d(sigc).get_dat(g);
+    xslib.GetLibData(mat).GetXSData().GetData1d(sigc).add_data(g,org*0.01);
+  };
+  */
+
+};
+
+void GeneralBurner::SetLibraryAll(string cbglibdir,string lib)
+{
+  int fp_num=223;
+  string filename_fp[]={
+    // (Fission products : 223 nuclides)
+    "Zn064","Zn066","Zn067","Zn068","Zn070",
+    "Ga069","Ga071",
+    "Ge070","Ge072","Ge073","Ge074","Ge076",
+    "As075",
+    "Se074","Se076","Se077","Se078","Se079","Se080","Se082",
+    "Br079","Br081",
+    "Kr078","Kr080","Kr082","Kr083","Kr084","Kr085","Kr086",
+    "Rb085","Rb086","Rb087",
+    "Sr084","Sr086","Sr087","Sr088","Sr089","Sr090",
+    "Y089","Y090","Y091",
+    "Zr090","Zr091","Zr092","Zr093","Zr094","Zr095","Zr096",
+    "Nb093","Nb094","Nb095",
+    "Mo092","Mo094","Mo095","Mo096","Mo097","Mo098","Mo099","Mo100",
+    "Tc099.U8R", // !
+    "Ru096","Ru098","Ru099","Ru100","Ru101","Ru102","Ru103","Ru104","Ru105","Ru106",
+    "Rh103","Rh105",
+    "Pd102","Pd104","Pd105","Pd106","Pd107","Pd108.T2","Pd110", // !
+    "Ag107","Ag109.T2","Ag110m","Ag111", // !
+    "Cd106","Cd108","Cd110","Cd111","Cd112","Cd113","Cd114","Cd116",
+    "In113","In115",
+    "Sn112","Sn114","Sn115","Sn116","Sn117","Sn118","Sn119","Sn120","Sn122","Sn123","Sn124","Sn126",
+    "Sb121","Sb123","Sb124","Sb125","Sb126",
+    "Te120","Te122","Te123","Te124","Te125","Te126","Te127m","Te128","Te129m","Te130","Te132",
+    "I127","I129","I130","I131","I135",
+    "Xe124","Xe126","Xe128","Xe129","Xe130","Xe131.T2","Xe132","Xe133","Xe134","Xe135","Xe136", // !
+    "Cs133.T2","Cs134","Cs135","Cs136","Cs137", // !
+    "Ba130","Ba132","Ba134","Ba135","Ba136","Ba137","Ba138","Ba140",
+    "La138","La139","La140",
+    "Ce140","Ce141","Ce142","Ce143","Ce144",
+    "Pr141","Pr143",
+    "Nd142","Nd143","Nd144","Nd145","Nd146","Nd147","Nd148","Nd150",
+    "Pm147","Pm148","Pm148m","Pm149","Pm151",
+    "Sm144","Sm147","Sm148","Sm149","Sm150.T2","Sm151.U8R","Sm152.U8R","Sm153","Sm154", // !
+    "Eu151","Eu152","Eu153.T2","Eu154","Eu155","Eu156","Eu157", // !
+    "Gd152","Gd153","Gd154","Gd155","Gd156","Gd157","Gd158","Gd160",
+    "Tb159","Tb160",
+    "Dy154","Dy156","Dy158","Dy159","Dy160","Dy161","Dy162","Dy163","Dy164",
+    "Ho165",
+    "Er162","Er164","Er166","Er167","Er168","Er170",
+    "Hf174","Hf176","Hf177","Hf178","Hf179","Hf180","Hf181","Hf182",
+  };
+  SetLibrary(cbglibdir,lib,fp_num,filename_fp);
+};
+
+
+
+void GeneralBurner::SetLibrary_172g(string cbglibdir,string lib)
+{
+  up_scattering=true;
+  PutGroup(172);
+
+  string libdir=cbglibdir;
+  if(lib=="jendl-4.0"){
+    libdir=libdir+"CBGLIB/j4.172g.iwt7/";
+  }else{
+    cout<<"# Error in GeneralBurner::SetLibrary.\n";
+    cout<<"# Library "<<lib<<" does not exist.\n";
+    exit(0);
+  };
+
+  xslib.Initialize(libdir,"N-ENERGY");
+  string filename_hm[]={
+    // (Heavy nuclides : 21 nuclides)
+    //"U234T","U235T","U236T","U237","U238T",
+    "U234T","U235.U8","U236T","U237","U238.mix",
+    //"Np237","Np239","Pu238T","Pu239T","Pu240T",
+    "Np237","Np239","Pu238.U8","Pu239.mix","Pu240.mix",
+    //"Pu241T","Pu242T","Am241T","Am242","Am242m",
+    "Pu241.mix","Pu242.mix","Am241.U8","Am242","Am242m",
+    "Am243T","Cm242","Cm243","Cm244.U8","Cm245T",
+    "Cm246",
+  };
+  string filename_str[]={
+    // (light or medium-heavy nuclides : 11 nuclides)
+    "O016","Zr000","H001","B010","Fe000",
+    "Cr000","Ni000","B011","Co059","Mn055",
+    "C000","Sn000"
+  };
+
+  /*
+  int fp_num=185+1;
+  string filename_fp[]={
+    // (Fission products : 185+1 nuclides)
+    "Ge073","Ge074","Ge076","As075","Se076",
+    "Se077","Se078","Se079","Se080","Se082",
+    "Br081","Kr082","Kr083","Kr084","Kr085",
+    "Kr086","Rb085","Rb086","Rb087","Sr086",
+    "Sr087","Sr088","Sr089","Sr090","Y089",
+    "Y090","Y091","Zr090","Zr091","Zr092",
+    "Zr093","Zr094","Zr095","Zr096","Nb093",
+    "Nb094","Nb095","Mo092","Mo094","Mo095",
+    "Mo096","Mo097","Mo098","Mo099","Mo100",
+    //"Tc099.U8","Ru100","Ru101","Ru102","Ru103",
+    "Tc099","Ru100","Ru101","Ru102","Ru103",
+    "Ru104","Ru105","Ru106","Rh103","Rh105",
+    //"Pd104","Pd105","Pd106","Pd107","Pd108.T2",
+    "Pd104","Pd105","Pd106","Pd107","Pd108",
+    //"Pd110","Ag107","Ag109.T2","Ag110m","Cd110",
+    "Pd110","Ag107","Ag109","Ag110m","Cd110",
+    "Cd111","Cd112","Cd113","Cd114","Cd116",
+    "In113","In115","Sn116","Sn117","Sn118",
+    "Sn119","Sn120","Sn122","Sn123","Sn124",
+    "Sn126","Sb121","Sb123","Sb124","Sb125",
+    "Sb126","Te122","Te123","Te124","Te125",
+    "Te126","Te127m","Te128","Te129m","Te130",
+    "Te132","I127","I129","I130","I131",
+    "I135","Xe126","Xe128","Xe129","Xe130",
+    //"Xe131.T2","Xe132","Xe133","Xe134","Xe135",
+    "Xe131","Xe132","Xe133","Xe134","Xe135",
+    //"Xe136","Cs133.T2","Cs134","Cs135","Cs136",
+    "Xe136","Cs133","Cs134","Cs135","Cs136",
+    "Cs137","Ba134","Ba135","Ba136","Ba137",
+    "Ba138","Ba140","La139","La140","Ce140",
+    "Ce141","Ce142","Ce143","Ce144","Pr141",
+    "Pr143","Nd142","Nd143","Nd144","Nd145",
+    "Nd146","Nd147","Nd148","Nd150","Pm147",
+    "Pm148","Pm148m","Pm149","Pm151","Sm147",
+    //"Sm148","Sm149","Sm150.U8","Sm151.U8","Sm152.U8",
+    //"Sm148","Sm149","Sm150.T2","Sm151.U8","Sm152.U8",
+    "Sm148","Sm149","Sm150","Sm151","Sm152",
+    //"Sm153","Sm154","Eu151","Eu152","Eu153.T2",
+    "Sm153","Sm154","Eu151","Eu152","Eu153",
+    "Eu154","Eu155","Eu156","Eu157","Gd152",
+    "Gd154","Gd155","Gd156","Gd157","Gd158",
+    "Gd160","Tb159","Tb160","Dy160","Dy161",
+    "Dy162","Dy163","Dy164","Ho165","Er162",
+    "Er164","Er166","Er167","Er168","Er170",
+    "Hf176","Hf177","Hf178","Hf179","Hf180",
+    "Gd153",
+  };
+  */
+
+  int fp_num=223;
+  string filename_fp[]={
+    // (Fission products : 223 nuclides)
+    "Zn064","Zn066","Zn067","Zn068","Zn070",
+    "Ga069","Ga071",
+    "Ge070","Ge072","Ge073","Ge074","Ge076",
+    "As075",
+    "Se074","Se076","Se077","Se078","Se079","Se080","Se082",
+    "Br079","Br081",
+    "Kr078","Kr080","Kr082","Kr083","Kr084","Kr085","Kr086",
+    "Rb085","Rb086","Rb087",
+    "Sr084","Sr086","Sr087","Sr088","Sr089","Sr090",
+    "Y089","Y090","Y091",
+    "Zr090","Zr091","Zr092","Zr093","Zr094","Zr095","Zr096",
+    "Nb093","Nb094","Nb095",
+    "Mo092","Mo094","Mo095","Mo096","Mo097","Mo098","Mo099","Mo100",
+    //"Tc099.U8",
+    "Tc099",
+    "Ru096","Ru098","Ru099","Ru100","Ru101","Ru102","Ru103","Ru104","Ru105","Ru106",
+    "Rh103","Rh105",
+    //"Pd102","Pd104","Pd105","Pd106","Pd107","Pd108.T2","Pd110",
+    "Pd102","Pd104","Pd105","Pd106","Pd107","Pd108","Pd110",
+    //"Ag107","Ag109.T2","Ag110m","Ag111",
+    "Ag107","Ag109","Ag110m","Ag111",
+    "Cd106","Cd108","Cd110","Cd111","Cd112","Cd113","Cd114","Cd116",
+    "In113","In115",
+    "Sn112","Sn114","Sn115","Sn116","Sn117","Sn118","Sn119","Sn120","Sn122","Sn123","Sn124","Sn126",
+    "Sb121","Sb123","Sb124","Sb125","Sb126",
+    "Te120","Te122","Te123","Te124","Te125","Te126","Te127m","Te128","Te129m","Te130","Te132",
+    "I127","I129","I130","I131","I135",
+    //"Xe124","Xe126","Xe128","Xe129","Xe130","Xe131.T2","Xe132","Xe133","Xe134","Xe135","Xe136",
+    "Xe124","Xe126","Xe128","Xe129","Xe130","Xe131","Xe132","Xe133","Xe134","Xe135","Xe136",
+    "Cs133.T2","Cs134","Cs135","Cs136","Cs137",
+    //"Cs133","Cs134","Cs135","Cs136","Cs137",
+    "Ba130","Ba132","Ba134","Ba135","Ba136","Ba137","Ba138","Ba140",
+    "La138","La139","La140",
+    "Ce140","Ce141","Ce142","Ce143","Ce144",
+    "Pr141","Pr143",
+    "Nd142","Nd143","Nd144","Nd145","Nd146","Nd147","Nd148","Nd150",
+    "Pm147","Pm148","Pm148m","Pm149","Pm151",
+    //"Sm144","Sm147","Sm148","Sm149","Sm150.T2","Sm151.U8","Sm152.U8","Sm153","Sm154",
+    "Sm144","Sm147","Sm148","Sm149","Sm150.U8","Sm151.U8","Sm152.U8","Sm153","Sm154",
+    "Eu151","Eu152","Eu153.T2","Eu154","Eu155","Eu156","Eu157",
+    //"Eu151","Eu152","Eu153","Eu154","Eu155","Eu156","Eu157",
+    "Gd152","Gd153","Gd154","Gd155","Gd156","Gd157","Gd158","Gd160",
+    "Tb159","Tb160",
+    "Dy154","Dy156","Dy158","Dy159","Dy160","Dy161","Dy162","Dy163","Dy164",
+    "Ho165",
+    "Er162","Er164","Er166","Er167","Er168","Er170",
+    "Hf174","Hf176","Hf177","Hf178","Hf179","Hf180","Hf181","Hf182",
+  };
+
+
+  xslib.ReadFile(21,libdir,filename_hm);
+  xslib.ReadFile(fp_num,libdir,filename_fp);
+  xslib.ReadFile(12,libdir,filename_str);
+
+
+  // (thermal data)
+  string libth=libdir;
+  libth.append("Thermal/");
+  xslib.GetLibData(10010).GetThScat().ReadFile(libth,"H.H2O");
+  xslib.GetLibData(80160).GetThScat().ReadFile(libth,"O");
+  xslib.GetLibData(922350).GetThScat().ReadFile(libth,"U235");
+  xslib.GetLibData(922380).GetThScat().ReadFile(libth,"U238");
+
+  // (Bell factor-optimization)
+  string belldir=libdir+"Bell/";
+  xslib.ReadBellFactor(belldir,"U235",922350);
+  xslib.ReadBellFactor(belldir,"U238",922380);
+  xslib.ReadBellFactor(belldir,"Pu239",942390);
+  xslib.ReadBellFactor(belldir,"Pu240",942400);
+  xslib.ReadBellFactor(belldir,"Pu241",942410);
+  xslib.ReadBellFactor(belldir,"Pu242",942420);
+
+  /*
+  for(int i=0;i<172;i++){
+    real e0=xslib.GetEnband().get_dat(i);
+    if(e0<100.)xslib.GetLibData(922380).PutBellFactor(i,1.2);
+    //cout<<xslib.GetEnband().get_dat(i)<<" ";
+    //cout<<xslib.GetLibData(922380).GetBellFactor(i)<<"\n";
+  };
+  //exit(0);
+  */
+  
+  // +++ multiple R-perameter for Cm-244 and U-238 / Cm-244 and Pu-239.
+  XSLibrary xslib2;
+  xslib2.Initialize(libdir,"N-ENERGY");
+
+  string fname[]={"U238.P0","Pu239.P0","Cm244.P9","Sm152.P9"};
+  int idtmp[]={0,1,2,3};
+  //xslib2.ReadFile(3,libdir,fname,idtmp);
+  xslib2.ReadFile(2,libdir,fname,idtmp);  
+
+  xslib.GetLibData(922380).GetFtable().AddData(xslib2.GetLibData(0).GetFtable(),68); // w Pu-240
+  xslib.GetLibData(942390).GetFtable().AddData(xslib2.GetLibData(1).GetFtable(),79); // w Pu-240
+
+  // (The following treatment was ineffective for ND calculations of Cm-245, Sm-152, etc.) 
+  //xslib.GetLibData(962440).GetFtable().AddData(xslib2.GetLibData(2).GetFtable(),86); // w Pu-239
+  //xslib.GetLibData(621520).GetFtable().AddData(xslib2.GetLibData(2).GetFtable(),86); // w Pu-239    
+  //xslib.GetLibData(621520).GetFtable().AddData(xslib2.GetLibData(2).GetFtable(),87); // w Pu-239    
+
+};
+
+void GeneralBurner::SetLibraryFP103(string cbglibdir,string lib)
+{
+  int fp_num=98;
+  string filename_fp[]={
+    // (Fission products : 98 nuclides)
+    "Kr083","Kr085","Sr090","Y090","Zr093",
+    "Zr095","Zr096","Nb095","Mo095","Mo097",
+    "Mo098","Mo099","Mo100","Tc099.U8","Ru100",
+    "Ru101","Ru102","Ru103","Ru104","Ru105",
+    "Ru106","Rh103","Rh105","Ag109.T2","Pd104",
+    "Pd105","Pd106","Pd107","Pd108.T2","Cd110",
+    "Cd111","Cd112","Cd113","Cd114","Cd116",
+    "Ag107","In115","Sn126","Sb125","Sb126",
+    "Te127m","I127","I129","I131","I135",
+    "Xe131.T2","Xe132","Xe133","Xe134","Xe135",
+
+    "Xe136","La139","La140","Cs133.T2","Cs134",
+    "Cs135","Cs137","Ce140","Ce141","Ce144",
+    "Ba137","Ba138","Ba140","Pr141","Pr143",
+    "Nd142","Nd143","Nd144","Nd145","Nd146",
+    "Nd147","Nd148","Nd150","Pm147","Pm148",
+    "Pm149","Pm151","Sm147","Sm148","Sm149",
+    "Sm150.T2","Sm151.U8","Sm152.U8","Eu151","Eu152",
+    "Eu153.T2","Eu154","Eu155","Eu156","Eu157",
+    "Gd152","Gd154","Gd155","Gd156","Gd157",
+    "Gd158","Gd160","Pm148m",
+  };
+  SetLibrary(cbglibdir,lib,fp_num,filename_fp);
+};
+
+void GeneralBurner::SetLibraryFP103_70g(string cbglibdir)
+{
+  up_scattering=false;
+  PutGroup(70);
+
+  string libdir=cbglibdir+"CBGLIB/j4.70g.iwt7/";
+  string libdir2=cbglibdir+"CBGLIB/tdl11.70g.iwt7/";
+  xslib.Initialize(libdir,"N-ENERGY");
+  string filename_hm[]={
+    // (Heavy nuclides : 21 nuclides)
+    "U234","U235","U236","U237","U238",
+    "Np237","Np239","Pu238","Pu239","Pu240",
+    "Pu241","Pu242","Am241","Am242","Am242m",
+    "Am243","Cm242","Cm243","Cm244","Cm245",
+    "Cm246",
+  };
+  string filename_fp[]={
+    // (Fission products : 98 nuclides)
+    "Kr083","Kr085","Sr090","Y090","Zr093",
+    "Zr095","Zr096","Nb095","Mo095","Mo097",
+    "Mo098","Mo099","Mo100","Tc099","Ru100",
+    "Ru101","Ru102","Ru103","Ru104","Ru105",
+    "Ru106","Rh103","Rh105","Ag109","Pd104",
+    "Pd105","Pd106","Pd107","Pd108","Cd110",
+    "Cd111","Cd112","Cd113","Cd114","Cd116",
+    "Ag107","In115","Sn126","Sb125","Sb126",
+    "Te127m","I127","I129","I131","I135",
+    "Xe131","Xe132","Xe133","Xe134","Xe135",
+
+    "Xe136","La139","La140","Cs133","Cs134",
+    "Cs135","Cs137","Ce140","Ce141","Ce144",
+    "Ba137","Ba138","Ba140","Pr141","Pr143",
+    "Nd142","Nd143","Nd144","Nd145","Nd146",
+    "Nd147","Nd148","Nd150","Pm147","Pm148",
+    "Pm149","Pm151","Sm147","Sm148","Sm149",
+    "Sm150","Sm151","Sm152","Eu151","Eu152",
+    "Eu153","Eu154","Eu155","Eu156","Eu157",
+    "Gd152","Gd154","Gd155","Gd156","Gd157",
+    "Gd158","Gd160","Pm148m",
+  };
+  string filename_fp2[]={
+    "Nb093m","Rh106","Sb126m","Ba137m","Pr144"
+  };
+  string filename_str[]={
+    // (light or medium-heavy nuclides : 8 nuclides)
+    "O016","Zr000","H001","B010","Fe000",
+    "Cr000","Ni000","B011","Na023","Mn055",
+    "Mo000","Co059"
+  };
+
+  xslib.ReadFile(21,libdir,filename_hm);
+  xslib.ReadFile(98,libdir,filename_fp);
+  xslib.ReadFile(5,libdir2,filename_fp2);
+  xslib.ReadFile(12,libdir,filename_str);
+};
+
+void GeneralBurner::SetLibraryForThorium(string cbglibdir,string lib)
+{
+  SetLibrary(cbglibdir,lib);
+
+  int nn=7;
+  string filename[]={"Th232T","Pa231","Pa233","U232","U233T","Np236","Pu236"};
+
+  string libdir=cbglibdir;
+  if(lib=="jendl-3.3"){
+    libdir=libdir+"CBGLIB/j33.107g.iwt7/";
+  }else if(lib=="jendl-4.0"){
+    libdir=libdir+"CBGLIB/j4.107g.iwt7/";
+  }else if(lib=="endf-7.1"){
+    libdir=libdir+"CBGLIB/e71.107g.iwt7/";
+  }else if(lib=="jeff-3.1.1"){
+    libdir=libdir+"CBGLIB/jf311.107g.iwt7/";
+  }else{
+    cout<<"# Error in GeneralBurner::SetLibrary.\n";
+    cout<<"# Library "<<lib<<" does not exist.\n";
+    exit(0);
+  };
+
+  xslib.ReadFile(nn,libdir,filename);  
+};
+
+void GeneralBurner::AddLibraryForVariousCoolant(string cbglibdir,string lib)
+{
+  int nn=2;
+  string filename[]={"H002","C000"};
+
+  string libdir=cbglibdir;
+  if(lib=="jendl-3.3"){
+    libdir=libdir+"CBGLIB/j33.107g.iwt7/";
+  }else if(lib=="jendl-4.0"){
+    libdir=libdir+"CBGLIB/j4.107g.iwt7/";
+  }else if(lib=="endf-7.1"){
+    libdir=libdir+"CBGLIB/e71.107g.iwt7/";
+  }else if(lib=="jeff-3.1.1"){
+    libdir=libdir+"CBGLIB/jf311.107g.iwt7/";
+  }else{
+    cout<<"# Error in GeneralBurner::AddLibraryForVariousCoolant.\n";
+    cout<<"# Library "<<lib<<" does not exist.\n";
+    exit(0);
+  };
+
+  xslib.ReadFile(nn,libdir,filename);
+
+  // (thermal data)
+  string libth=libdir;
+  libth.append("Thermal/");
+  xslib.GetLibData(10020).GetThScat().ReadFile(libth,"D.D2O");
+  
+};
+
+void GeneralBurner::AddLibraryForMinorFP(string cbglibdir)
+{
+  //int fpnum=95;
+  int fpnum=97; // Nb-93m and Eu-152m are added
+
+  string filename[]={
+"As077","Br082","Br083","Br084","Kr083m","Kr085m","Kr087","Kr088","Kr089","Rb088",
+"Rb089","Rb090","Sr091","Sr092","Sr093","Sr094","Y091m","Y092","Y093","Y094",
+"Y095","Zr097","Nb093m","Nb095m","Nb096","Nb097","Mo101","Mo102","Tc098","Tc099m","Tc101",
+"Tc104","Tc105","Ru107","Ru108","Rh103m","Rh107","Pd109","Pd112","Ag112","Ag113",
+"Cd113m","Cd115","Cd115m","In115m","Sn119m","Sn121","Sn121m","Sn125","Sn127","Sn128",
+
+"Sb122","Sb127","Sb128","Sb129","Sb130","Sb131","Te125m","Te127","Te129","Te131",
+"Te131m","Te133","Te133m","Te134","I132","I133","I134","Xe131m","Xe133m","Xe135m",
+"Xe137","Xe138","Cs134m","Cs138","Cs139","Ba139","Ba141","Ba142","La141","La142",
+"La143","Ce145","Ce146","Pr142","Pr144","Pr145","Pr146","Pr147","Nd149","Nd151",
+"Pm146","Sm146","Sm156","Eu152m","Gd159","Tb161"
+  };
+
+  string libdir=cbglibdir+"CBGLIB/tdl19.107g.iwt7/";
+  xslib.ReadFile(fpnum,libdir,filename);
+};
+
+
+//
+
+void GeneralBurner::SetLibrary70g(string cbglibdir)
+{
+  PutGroup(70);
+
+  string libdir=cbglibdir+"CBGLIB/j4.70g.iwt7/";
+  string libdir2=cbglibdir+"CBGLIB/tdl11.70g.iwt7/";
+  xslib.Initialize(libdir,"N-ENERGY");
+  string filename_hm[]={
+    // (Heavy nuclides : 21 nuclides)
+    "U234","U235","U236","U237","U238",
+    "Np237","Np239","Pu238","Pu239","Pu240",
+    "Pu241","Pu242","Am241","Am242","Am242m",
+    "Am243","Cm242","Cm243","Cm244","Cm245",
+    "Cm246",
+  };
+  string filename_fp1[]={
+    // (Fission products : 185 nuclides)
+    "Ge073","Ge074","Ge076","As075","Se076",
+    "Se077","Se078","Se079","Se080","Se082",
+    "Br081","Kr082","Kr083","Kr084","Kr085",
+    "Kr086","Rb085","Rb086","Rb087","Sr086",
+    "Sr087","Sr088","Sr089","Sr090","Y089",
+    "Y090","Y091","Zr090","Zr091","Zr092",
+    "Zr093","Zr094","Zr095","Zr096","Nb093",
+    "Nb094","Nb095","Mo092","Mo094","Mo095",
+    "Mo096","Mo097","Mo098","Mo099","Mo100",
+    "Tc099","Ru100","Ru101","Ru102","Ru103",
+    "Ru104","Ru105","Ru106","Rh103","Rh105",
+    "Pd104","Pd105","Pd106","Pd107","Pd108",
+    "Pd110","Ag107","Ag109","Ag110m","Cd110",
+    "Cd111","Cd112","Cd113","Cd114","Cd116",
+    "In113","In115","Sn116","Sn117","Sn118",
+    "Sn119","Sn120","Sn122","Sn123","Sn124",
+    "Sn126","Sb121","Sb123","Sb124","Sb125",
+    "Sb126","Te122","Te123","Te124","Te125",
+    "Te126","Te127m","Te128","Te129m","Te130",
+    "Te132","I127","I129","I130","I131",
+    "I135","Xe126","Xe128","Xe129","Xe130",
+    "Xe131","Xe132","Xe133","Xe134","Xe135",
+    "Xe136","Cs133","Cs134","Cs135","Cs136",
+    "Cs137","Ba134","Ba135","Ba136","Ba137",
+    "Ba138","Ba140","La139","La140","Ce140",
+    "Ce141","Ce142","Ce143","Ce144","Pr141",
+    "Pr143","Nd142","Nd143","Nd144","Nd145",
+    "Nd146","Nd147","Nd148","Nd150","Pm147",
+    "Pm148","Pm148m","Pm149","Pm151","Sm147",
+    "Sm148","Sm149","Sm150","Sm151","Sm152",
+    "Sm153","Sm154","Eu151","Eu152","Eu153",
+    "Eu154","Eu155","Eu156","Eu157","Gd152",
+    "Gd154","Gd155","Gd156","Gd157","Gd158",
+    "Gd160","Tb159","Tb160","Dy160","Dy161",
+    "Dy162","Dy163","Dy164","Ho165","Er162",
+    "Er164","Er166","Er167","Er168","Er170",
+    "Hf176","Hf177","Hf178","Hf179","Hf180",
+  };
+  string filename_str[]={
+    // (light or medium-heavy nuclides : 11 nuclides)
+    "O016","Zr000","H001","B010","Fe000",
+    "Cr000","Ni000","B011","Na023","Mn055",
+    "Mo000","Co059"
+  };
+  string filename_fp2[]={
+    "Nb093m","Rh106","Cd113m","Sn119m","Sn121",
+    "Sn121m","Sb126m","Te123m","Te125m","Ba137m",
+    "Pr144","Ho163","Ho166m",
+  };
+
+  xslib.ReadFile(21,libdir,filename_hm);
+  xslib.ReadFile(185,libdir,filename_fp1);
+  xslib.ReadFile(12,libdir,filename_str);
+  xslib.ReadFile(13,libdir2,filename_fp2);
+};
+
+
+void GeneralBurner::PutBurnStep(int i)
+{
+  burn_step=i;
+
+  power_density_list.resize(burn_step);
+  flux_level_list.resize(burn_step);
+  burn_time.resize(burn_step);
+  burn_time_gwd.resize(burn_step);
+  sub_step_list.resize(burn_step+1);
+  keff.resize(burn_step+1);
+  abs_frac.resize(burn_step+1);
+  //acday.resize(burn_step+1);
+  //acburn.resize(burn_step+1);
+
+  for(int i=0;i<burn_step;i++){
+    sub_step_list[i]=sub_step_org;
+  };
+
+};
+
+void GeneralBurner::PutSubstepList(int *inp)
+{
+  for(int i=0;i<burn_step;i++){
+    sub_step_list[i]=inp[i];
+    if(sub_step_list[i]<1||sub_step_list[i]>100000){
+      cout<<"# Error in GeneralBurner::PutSubstepList.\n";
+      cout<<"# Inappropriate substep : "<<sub_step_list[i]<<"\n";
+      exit(0);
+    };
+  };
+};
+
+void GeneralBurner::PutPowerDensity(real inp,string type)
+{
+  real *pinp=new real[burn_step];
+  for(int i=0;i<burn_step;i++){
+    pinp[i]=inp;
+  };
+  PutPowerDensityList(pinp,type);
+  delete [] pinp;
+};
+
+void GeneralBurner::PutPowerDensityList(real *inp,string type)
+{
+  for(int i=0;i<burn_step;i++){
+    if(!(inp[i]>=0.&&inp[i]<1e5)){
+      cout<<"# Error in GeneralBurner::PutPowerDensityList.\n";
+      cout<<"# Power density is out of range (0< power density <1e5)\n";
+      exit(0);
+    };
+    power_density_list[i]=inp[i];
+  };
+
+  for(int i=0;i<burn_step;i++){
+    if(power_density_list[i]<1e-5){
+      power_density_list[i]=0.;
+    };
+  };
+
+  if(type=="W_cm"||type=="MW_t"){
+    input_power_unit=type;
+  }else{
+    cout<<"# Error in GeneralBurner::PutPowerDensityList.\n";
+    cout<<"# Unit ("<<type<<") is inappropriate.\n";
+    exit(0);
+  };
+};
+
+void GeneralBurner::PutFluxLevelList(real *inp)
+{
+  input_flux_level=true;
+  for(int i=0;i<burn_step;i++){
+    flux_level_list[i]=inp[i];
+  };
+};
+
+void GeneralBurner::PutFluxLevel(real inp)
+{
+  input_flux_level=true;
+  for(int i=0;i<burn_step;i++){
+    flux_level_list[i]=inp;
+  };
+};
+
+void GeneralBurner::PutBurnTime(real *inp,bool GWd_t,bool accumulate,int div)
+{
+  burn_time_calc=false;
+
+  int index=0;
+  for(int i=0;i<burn_step;i++){
+    burn_time[i]=inp[index]/div;
+    if((i+1)%div==0)index++;
+  };
+  burn_time_GWd_t=GWd_t;
+  burn_time_accumulate=accumulate;
+};
+
+void GeneralBurner::PutBurnTime(real inp,bool GWd_t,bool accumulate)
+{
+  real *inp2=new real[burn_step];
+  for(int i=0;i<burn_step;i++){
+    inp2[i]=inp;
+  };
+  PutBurnTime(inp2,GWd_t,accumulate);
+  delete [] inp2;
+};
+
+void GeneralBurner::ShowBurnupConditionSetting()
+{
+  cout<<"# --------------------------------------------------\n";
+  cout<<"# BURNUP CONDITION SETTING\n";
+  cout<<"#\n";
+  cout<<"# The number of burnup steps : "<<burn_step<<"\n";
+  cout<<"#\n";
+
+  cout<<"# Step ";
+  if(burn_time_GWd_t){
+    cout<<"BU [GWD/t]     BU-width[GWD/t]  ";
+  }else{
+    cout<<"Day            Day-width        ";    
+  };
+  if(input_flux_level){
+    cout<<"Flux level";
+  }else{
+    cout<<"Power density ["<<input_power_unit<<"]";
+  };
+  cout<<"\n#\n";
+  real accumulate_time=0.;
+  for(int i=0;i<burn_step;i++){
+    WriteOut(i,5);
+    cout<<"  ";
+    cout.setf(ios::scientific);
+    cout.precision(5);
+    cout<<accumulate_time<<"  "<<burn_time[i]<<"   ";
+    if(input_flux_level){
+      cout<<flux_level_list[i];
+    }else{
+      cout<<power_density_list[i];
+    };
+    cout<<"\n";
+    accumulate_time+=burn_time[i];
+  };
+  cout<<"       "<<accumulate_time<<"\n";
+  cout<<"# --------------------------------------------------\n";  
+};
+
+void GeneralBurner::PreCalculation_bt()
+{
+  if(input_flux_level&&burn_time_GWd_t){
+    cout<<"# Error in GeneralBurner::PreCalculation_bt.\n";
+    cout<<"# Burnup cannot be assigned\n";
+    cout<<"# when neutron flux is normalized by total neutron flux.\n";
+    exit(0);
+  };
+
+  if(burn_time_calc)return;
+ 
+  burn_time_calc=true;
+  //
+  if(burn_time_accumulate){
+    for(int i=burn_step-1;i>0;i--){
+      if((!input_flux_level&&power_density_list[i]>0.)||(input_flux_level&&flux_level_list[i]>0.)){
+	bool tag=false;
+	for(int j=i-1;j>=0;j--){
+          if(!tag){
+            if((!input_flux_level&&power_density_list[j]>0.)||(input_flux_level&&flux_level_list[j]>0.)){
+ 	      tag=true;
+              burn_time[i]-=burn_time[j];
+	    };
+	  };
+	};
+      };
+    };
+  };
+
+  if(burn_time_GWd_t){
+    for(int i=0;i<burn_step;i++){
+      burn_time_gwd[i]=burn_time[i];
+      if(power_density_list[i]==0.){
+        burn_time_gwd[i]=0.;
+      }else{
+        burn_time[i]*=hm_weight_init*1e-6/1e-9/power_density_list[i];
+      };
+    };
+  }else{
+    for(int i=0;i<burn_step;i++){
+      if(power_density_list[i]==0.){
+        burn_time_gwd[i]=0.;      
+      }else{
+        burn_time_gwd[i]=burn_time[i]/(hm_weight_init*1e-6/1e-9/power_density_list[i]);
+      };
+    };
+  };
+
+  // (zero power case)
+  for(int i=0;i<burn_step;i++){
+    if((!input_flux_level&&power_density_list[i]==0.)||(input_flux_level&&flux_level_list[i]==0.)){
+      sub_step_list[i]=1;
+      if(sensitivity)sub_step_list[i]=20; // Kawamoto
+      //if(sensitivity)sub_step_list[i]=40; // Kawamoto
+    };
+    /*
+    if(power_density_list[i]==0.&&sensitivity==false)sub_step_list[i]=1;
+    if(power_density_list[i]==0.&&sensitivity==true)sub_step_list[i]=40; //kawamoto
+    */
+  };
+
+  for(int i=0;i<burn_step;i++){
+    //cout<<burn_time[i]<<" "<<burn_time_gwd[i]<<" "<<sub_step_list[i]<<"\n";
+    if(burn_time[i]<=0.){
+      cout<<"#\n# Error in GeneralBurner::PreCalculation_bt\n";
+      cout<<"# Time(burnup) interval of step "<<i<<" is less than 0.\n#\n";
+      exit(0);
+    };
+  };
+};
+
+
+// +++
+
+void GeneralBurner::PutFuelData(FRDTFuelComposition &fcom,real temp)
+{
+  int num=0;
+  for(int i=0;i<fcom.GetNucnum();i++){
+    real den=fcom.GetDensity(i);
+    if(den>0.)num++;
+  };
+
+  int *mat=new int[num];
+  real *den=new real[num];
+
+  num=0;
+  for(int i=0;i<fcom.GetNucnum();i++){
+    real deninp=fcom.GetDensity(i);
+    if(deninp>0.){
+      mat[num]=fcom.GetNucid(i);
+      den[num]=deninp;
+      num++;
+    };
+  };
+
+  PutFuelData(num,mat,den,temp,0);
+
+  delete [] mat;
+  delete [] den;
+};
+
+
+void GeneralBurner::PutFuelData(int nuc,int *mat,real *den,real temp,int medid)
+{
+  med[medid].PutImax(group);
+  if(pl0_calc){
+    med[medid].PutPL(0,1);
+  }else{
+    med[medid].PutPL(1);
+  };
+  cout<<"#\n# Fuel number density information\n#\n";
+  med[medid].NuclideClear();
+  for(int i=0;i<nuc;i++){
+    if(mat[i]<=9999)mat[i]=midt.GetMATIDFromENDFID(mat[i]);
+    if(mat[i]>9999999){
+      cout<<"# Error in GeneralBurner::PutFuelData.\n";
+      cout<<"# Inphysical nuclide-ID is detected.\n";
+      cout<<"# ID is "<<mat[i]<<"\n";
+      exit(0);
+    };
+    Nuclide nucinp;
+    nucinp.PutMatnum(mat[i]);
+    if(den[i]>0.1){
+      cout<<"# Error(?) in Burner::PutFuelData.\n";
+      cout<<"# Too large values for number density : "<<den[i]<<"\n";
+      cout<<"# Material ID is "<<mat[i]<<"\n";
+      exit(0);
+    };
+    if(den[i]<0.){
+      cout<<"# Error in Burner::PutFuelData.\n";
+      cout<<"# Negative number density is detected.\n";
+      cout<<"# Material ID is "<<mat[i]<<"\n";
+      exit(0);
+    };
+    nucinp.PutDensity(den[i]);
+    nucinp.PutTemperature(temp);
+    cout<<"#    "<<midt.Name(mat[i])<<" : "<<den[i]<<"\n";
+    med[medid].AddNuclide(nucinp);
+  };
+  cout<<"#\n";
+};
+
+void GeneralBurner::PutNonfuelData(int medid, int nuc,int *mat,real *den,real temp)
+{
+  /*
+  if(medid==0){
+    cout<<"# Error in GeneralBurner::PutNonfuelData.\n";
+    cout<<"# Medium ID "<<medid<<" is for fuel medium.\n";
+    exit(0);
+  };
+
+  if(medid>=mednum){
+    cout<<"# Error in GeneralBurner::PutNonfuelData.\n";
+    cout<<"# Medium ID "<<medid<<" is larger than the number of medium "<<mednum<<"\n";
+    exit(0);
+  };
+  */
+
+  med[medid].PutImax(group);
+  if(pl0_calc){
+    med[medid].PutPL(0,1);
+  }else{
+    med[medid].PutPL(1);
+  };
+
+  for(int i=0;i<nuc;i++){
+    if(mat[i]<=9999)mat[i]=midt.GetMATIDFromENDFID(mat[i]);
+  };
+  med[medid].PutNuclide(nuc,mat,den);
+  med[medid].PutTemperatureForAllNuclide(temp);
+};
+
+void GeneralBurner::PutCladData(int nuc,int *mat,real *den,real temp)
+{
+  PutNonfuelData(med_clad, nuc, mat, den, temp);
+  /*
+  med[med_clad].PutImax(group);
+  if(pl0_calc){
+    med[med_clad].PutPL(0,1);
+  }else{
+    med[med_clad].PutPL(1);
+  };
+
+  for(int i=0;i<nuc;i++){
+    if(mat[i]<=9999)mat[i]=midt.GetMATIDFromENDFID(mat[i]);
+  };
+  med[med_clad].PutNuclide(nuc,mat,den);
+  med[med_clad].PutTemperatureForAllNuclide(temp);
+  */
+};
+
+void GeneralBurner::PutModeratorData(int nuc,int *mat,real *den,real temp)
+{
+  PutNonfuelData(med_water, nuc, mat, den, temp);
+  /*
+  med[med_water].PutImax(group);
+  if(pl0_calc){
+    med[med_water].PutPL(0,1);
+  }else{
+    med[med_water].PutPL(1);
+  };
+
+  for(int i=0;i<nuc;i++){
+    if(mat[i]<=9999)mat[i]=midt.GetMATIDFromENDFID(mat[i]);
+  };
+  med[med_water].PutNuclide(nuc,mat,den);
+  med[med_water].PutTemperatureForAllNuclide(temp);
+  */
+};
+
+void GeneralBurner::PutTemperature(int medid, real tempin)
+{
+  if(medid<0||medid>=mednum){
+    cout<<"# Error in GeneralBurner::PutTemperature.\n";
+    cout<<"# Medium ID "<<medid<<" is inappropriate.\n";
+    exit(0);
+  };
+
+  int nuc=med[medid].GetNucnum();
+  for(int i=0;i<nuc;i++){
+    med[medid].GetNuclideInTurn(i).PutTemperature(tempin);
+  };
+};
+
+void GeneralBurner::PutFuelTemperature(real tempin)
+{
+  for(int i=0;i<mednum_fuel;i++){
+    PutTemperature(i,tempin);
+  };
+};
+
+void GeneralBurner::PutWhiteBoundary()
+{
+  sys.PutBoundaryCondition(White);
+  sys_f.PutBoundaryCondition(White);
+};
+
+real GeneralBurner::GetKeff(int st)
+{
+  int sz=keff.size();
+  if(st<sz){
+    return keff[st];
+  }else{
+    cout<<"# Error in GeneralBurner::GetKeff.\n";
+    cout<<"# No data at burnup step "<<st<<"\n";
+    exit(0);
+  };
+};
+
+#if 0
+void GeneralBurner::SetLibraryTest(string cbglibdir,string lib)
+{
+  int fp_num=185+1;
+  string filename_fp[]={
+    // (Fission products : 185+1 nuclides)
+    "Ge073","Ge074","Ge076","As075","Se076",
+    "Se077","Se078","Se079","Se080","Se082",
+    "Br081","Kr082","Kr083","Kr084","Kr085",
+    "Kr086","Rb085","Rb086","Rb087","Sr086",
+    "Sr087","Sr088","Sr089","Sr090","Y089",
+    "Y090","Y091","Zr090","Zr091","Zr092",
+    "Zr093","Zr094","Zr095","Zr096","Nb093",
+    "Nb094","Nb095","Mo092","Mo094","Mo095",
+    "Mo096","Mo097","Mo098","Mo099","Mo100",
+    "Tc099","Ru100","Ru101","Ru102","Ru103",
+    "Ru104","Ru105","Ru106","Rh103","Rh105",
+    "Pd104","Pd105","Pd106","Pd107","Pd108",
+    "Pd110","Ag107","Ag109","Ag110m","Cd110",
+    "Cd111","Cd112","Cd113","Cd114","Cd116",
+    "In113","In115","Sn116","Sn117","Sn118",
+    "Sn119","Sn120","Sn122","Sn123","Sn124",
+    "Sn126","Sb121","Sb123","Sb124","Sb125",
+    "Sb126","Te122","Te123","Te124","Te125",
+    "Te126","Te127m","Te128","Te129m","Te130",
+    "Te132","I127","I129","I130","I131",
+    "I135","Xe126","Xe128","Xe129","Xe130",
+    "Xe131","Xe132","Xe133","Xe134","Xe135",
+    "Xe136","Cs133","Cs134","Cs135","Cs136",
+    "Cs137","Ba134","Ba135","Ba136","Ba137",
+    "Ba138","Ba140","La139","La140","Ce140",
+    "Ce141","Ce142","Ce143","Ce144","Pr141",
+    "Pr143","Nd142","Nd143","Nd144","Nd145",
+    "Nd146","Nd147","Nd148","Nd150","Pm147",
+    "Pm148","Pm148m","Pm149","Pm151","Sm147",
+    "Sm148","Sm149","Sm150","Sm151","Sm152",
+    "Sm153","Sm154","Eu151","Eu152","Eu153",
+    "Eu154","Eu155","Eu156","Eu157","Gd152",
+    "Gd154","Gd155","Gd156","Gd157","Gd158",
+    "Gd160","Tb159","Tb160","Dy160","Dy161",
+    "Dy162","Dy163","Dy164","Ho165","Er162",
+    "Er164","Er166","Er167","Er168","Er170",
+    "Hf176","Hf177","Hf178","Hf179","Hf180",
+    "Gd153",
+  };
+
+  up_scattering=true;
+  PutGroup(107);
+
+  string libdir=cbglibdir;
+  if(lib=="jendl-4"){
+    libdir=libdir+"CBGLIB/j4.107g.iwt3.j5t/";
+  }else if(lib=="jendl-5"){
+    libdir=libdir+"CBGLIB/j5a4.107g.iwt3.j5t/";
+  }else{
+    cout<<"# Error in GeneralBurner::SetLibrary.\n";
+    cout<<"# Library "<<lib<<" does not exist.\n";
+    exit(0);
+  };
+
+  xslib.Initialize(libdir,"N-ENERGY");
+  string filename_hm[]={
+    // (Heavy nuclides : 21 nuclides)
+    "U234","U235","U236","U237","U238",
+    "Np237","Np239","Pu238","Pu239","Pu240",
+    "Pu241","Pu242","Am241","Am242","Am242m",
+    "Am243","Cm242","Cm243","Cm244","Cm245",
+    "Cm246",
+  };
+  string filename_str[]={
+    // (light or medium-heavy nuclides : 11 nuclides)
+    "O016","Zr000","H001","B010","Fe000",
+    "Cr000","Ni000","B011","Co059","Mn055",
+    "C000","Sn000"
+  };
+
+  xslib.ReadFile(21,libdir,filename_hm);
+  xslib.ReadFile(fp_num,libdir,filename_fp);
+  xslib.ReadFile(12,libdir,filename_str);
+
+  // (thermal data)
+  string libth=libdir;
+  libth.append("Thermal/");
+  xslib.GetLibData(10010).GetThScat().ReadFile(libth,"H.H2O");
+  xslib.GetLibData(80160).GetThScat().ReadFile(libth,"O");
+
+};
+#endif

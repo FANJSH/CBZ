@@ -1,0 +1,255 @@
+#ifndef BURNER
+#define BURNER
+
+#include <cstdlib>
+#include <cmath> 
+#include <iostream>
+#include <vector>
+#include <string>
+#include <map>
+#include <fstream>
+#include <iomanip>
+
+#include "Numeric.h"
+#include "LibData.h"
+#include "Medium.h"
+#include "OnePointCalculator.h"
+#include "IrregularGeometryInformation.h"
+#include "PJI_trajectoryset.h"
+#include "PJI_system.h"
+#include "Burnup.h"
+#include "ENDFIDTranslator.h"
+#include "MATIDTranslator.h"
+#include "BurnupChainGenerator.h"
+#include "FRDesignTool.h"
+#include "DelayedNeutronData.h"
+#include "SensitivityData.h"
+#include "SelfShieldingCalculator.h"
+
+using namespace std;
+
+class Burner{
+ private:
+  int group;
+  int nucn;
+  bool up_scattering;
+  bool burn_time_calc;
+  //
+  int mesh;
+  int *region_medium;
+  real fuel_r,clad_r,fuel_vol,clad_vol,mod_vol;
+  TrajectorySet sys;
+  TrajectorySet sys_f;
+  int mesh_fuel,mesh_clad;
+  //
+  vector<Medium> med;
+  real hm_weight_init; // [g/cm] (NOT [g/cm3])
+  //
+  XSLibrary xslib;
+  ENDFIDTranslator eidt;
+  MATIDTranslator midt;
+  OnePointCalculator opc;
+  SelfShieldingCalculator ssc;
+  //
+  int burn_step;
+  int sub_step_org;
+  vector<real> power_density_list;
+  vector<real> flux_level_list;
+  vector<real> burn_time;
+  vector<real> burn_time_gwd;
+  vector<int> sub_step_list;
+  bool burn_time_GWd_t;
+  bool burn_time_accumulate;
+  bool input_flux_level;
+  string input_power_unit;
+  //
+  vector< vector<real> > density_data;
+  vector< vector<real> > xsc_1g;
+  vector< vector<real> > xsn2n_1g;
+  vector< vector<real> > xsf_1g;
+  //vector< vector<real> > xsnsf_1g;
+  vector<real> keff;
+  vector<real> acday;
+  vector<real> acburn;
+  vector<GroupData1D> fuel_flux;
+  vector<GroupData1D> clad_flux;
+  vector< vector<real> > power_factor;
+  vector< vector<real> > delt;
+  vector< vector<real> > total_flux; // normalized neutron flux in fuel region
+  vector< vector<real> > total_flux_clad; // normalized nxeutron flux in clad region
+  //
+  vector<int> nuclide_info; // 0:no cross section, 1:fissile, 2:other
+  //
+  GroupData1D dancoff;
+  //
+  bool limit_burnup;
+  real k_limit;
+  int batch;
+  real bumax;
+  // (for burnup matrix extraction)
+  bool matrix_extract;
+  string mat_ext_filename;
+  int mat_ext_prc;
+  // (for sensitivity calculation)
+  bool adj_nuc_data;
+  vector< vector<GroupData1D> > fwd_nuc;
+  vector< vector<GroupData1D> > adj_nuc;
+  vector< vector<GroupData1D> > adj_nuc_e;
+  vector< vector<GroupData1D> > adj_nuc_s;
+  vector< vector<real> > pow_adj;
+  vector< vector<GroupData1D> > volflx_mesh; // volume-integrated flux per mesh
+  vector< GroupDataSet > macxs;
+  vector< vector<GroupData1D> > mic_sigf;
+  vector< vector<GroupData1D> > mic_sigc;
+  vector< vector< vector<GroupData1D> > > gpt_flx;
+  vector< vector< vector<GroupData1D> > > dmdf_nuc;  // (dM/dphi) * (NUC_FWD)
+  GroupData2D trmat_flxindep;
+  // (for cooling calculation)
+  bool cooling_cal;
+ public:
+  Burner();
+  ~Burner(){delete [] region_medium;};
+  void PutGroup(int i);
+
+  void PutHeavyMetalInitialWeight(real i){hm_weight_init=i;};
+  real GetHeavyMetalInitialWeight(){return hm_weight_init;};
+  void CalHeavyMetalInitialWeight(Burnup &bu);
+
+  void CalHHMRatio();
+
+  void SetLibrary(string cbglibdir,string lib,int fp_num,string *fp_nuc);
+  void SetLibrary(string cbglibdir,string lib="jendl-4.0");
+  void SetLibrary(XSLibrary& libinp){up_scattering=true; PutGroup(107); xslib=libinp;};
+  void SetLibraryFP103(string cbglibdir,string lib="jendl-4.0");
+  void SetLibraryAll(string cbglibdir,string lib="jendl-4.0");
+  void SetLibraryForThorium(string cbglibdir,string lib="jendl-4.0");
+  void SetLibrary70g(string cbglibdir);
+  void SetLibraryFP103_70g(string cbglibdir);
+  void AddActinideDecayHeatDataToBurnupChain(string cbglibdir,string fname,Burnup &bu);
+
+  void PreCalculation(bool burn_time_cal=true);
+  void PreCalculation_bt();
+  void ConstructingFuelNuclide(Burnup &bu);
+  void PutNucn(int i);
+  void SelfShieldingCalculation(int step,GroupData1D &bell_default);
+  void Calculation(Burnup &bu,bool adjoint=false);
+  void CoolingCalculation(Burnup &bu,int sub_step=1);
+  void NuclideWiseReactivityEffectCalculationDuringCooling(Burnup &bu,int nuc,string *nuc_name);
+  void CalculationHomogeneous(Burnup &bu);
+  void dkdN_Calculation(Burnup &bu,string filename="out.dkdn");
+  void BurnupDependentKeffSensitivityCalculation(Burnup &bu,string filename="out.dkdn"){dkdN_Calculation(bu,filename);};
+  real CalMacroscopicReactionRate(int nuc,int *nuc_id,enum xstype *xs,bool *on_mesh);
+
+  // (burnup-sensitivity calculation)
+  void SensitivityCalculation(Burnup &bu,int nucnum,string *nucname,bool fileout=false);
+  void SensitivityCalculationDecayHeat(Burnup &bu,bool beta=true,bool gamma=true,bool alpha=true);
+  void SensitivityCalculationKeffEOC(Burnup &bu,bool vid=false);
+  void SensitivityCalculationKeffBOC(bool vid=false);
+  void SensitivityCalculationRRRBOC(Burnup &bu,int nume_nuc,int *nume_id,enum xstype *nume_xs,int denom_nuc,int *denom_id,enum xstype *denom_xs,bool *on_mesh);
+  void SensitivityCalculationRRREOC(Burnup &bu,int nume_nuc,int *nume_id,enum xstype *nume_xs,int denom_nuc,int *denom_id,enum xstype *denom_xs,bool *on_mesh);
+  void GetHMIndex(int *nucid,int &nucnum);
+  void SetArrayForSensitivityCalculation();
+  void AveragingForwardNumberDensity();
+  void AdjointBurnupCalculation(Burnup &bu);
+  void SensitivityPrinting(Burnup &bu,real response,string sys_name,string para_name,string lib_name,string addname="");
+  void SensitivityPrintingForDecayHeat(Burnup &bu,real response,vector<int> &nuc,vector<vector<real> > &energy_sens);//kawamoto
+  void SensitivityPrintingForDecayEnergy(vector<int> &nuc,vector<vector<real> > &energy_sens, real end_decayheat);//kawamoto
+  void WriteFileNumberDensity(string filename);
+  void WriteFileAdjointNumberDensity(string filename,int targetID);
+  void WriteFileContributionFunction(Burnup &bu,string filename,int targetID,real end_nuc);
+
+  void SensitivityRead(string filename,string nucname);
+  void BeffCalculation(DelayedNeutronData &dnd);
+  real EigenvalueCalculation(bool vid=false);
+  GroupData1D GetFuelNeutronFluxInitialState();
+  void Cal1groupBranchingRatio(string cbglibdir,string filename,string outfile);
+  
+  void PutFuelData(int nuc,int *mat,real *den,real temp);
+  void PutFuelData(FRDTFuelComposition &fcom,real temp);
+  void PutCladData(int nuc,int *mat,real *den,real temp);
+  void PutModeratorData(int nuc,int *mat,real *den,real temp);
+  real GetFuelVol(){return fuel_vol;};
+
+  void PutGeometryData(real pitch,int ring,real *rri,int *rmedi);
+  void PutGeometryDataCylinder(real pitch,int ring,real *rri,int *rmedi);
+  void PutThreeRegionCircularGeometry(real *rri);
+  void PutThreeRegionHexagonalGeometry(real pitch,real *rri);
+  void PutWhiteBoundary();
+
+  void PutBurnStep(int i);
+  void PutSubstep(int i){sub_step_org=i;};
+  void PutPowerDensityList(real *inp,string type="W_cm");
+  void PutFluxLevelList(real *inp);
+  void PutBurnTime(real *inp,bool GWd_t=true,bool accumulate=true);
+  void PutBurnTime(real inp,bool GWd_t=true,bool accumulate=true);
+
+  GroupData2D GetTransitionMatrix(Burnup &bu);  
+
+  Medium& GetMedium(int i){return med[i];};
+  void WriteFileFuelNumberDensity(string mdir,string ss){med[0].WriteFileNumberDensity(mdir,ss);};
+  void ReadFileFuelNumberDensity(string mdir,string ss){med[0].ReadFileNumberDensity(mdir,ss);};
+  // +++ (Functions for users' editting)
+  void GetNuclideDensity(vector<string> &nuc,vector<real> &den,int step);
+  real GetNuclideDensity(string nuc, int step){return GetNuclideDensity(midt.ID(nuc),step);};
+  real GetNuclideDensity(int id, int step);
+  // +++ (Functions for back-end quantity evaluation)
+  void CobaltActivationCalculation(real den_init,real flux_factor=1.);// initial number density of Cobalt-59
+  void Mn54ActivationCalculation(real den_init,real flux_factor=1.);// initial number density of Fe-54
+  void Reprocessing(real tc, real ru_rh, real fp, real ac);
+  void NumberDensityReset(int mat,real den);
+  void NumberDensityReset(int mat_st,int mat_ed,real den);
+  // +++ (Access function)
+  real GetBurnup(int i){return acburn[i];};
+  real GetEigenvalue(int i){return keff[i];};
+  real GetFuelFlux(int i,int j){return total_flux[i][j];};
+  real Get0Flux(int i){return GetFuelFlux(i,0);};
+  XSLibrary &GetXSLibrary(){return xslib;};
+  // +++ (For limited burnup calculation)
+  void LimitBurnupOn(real kl=1.03, int batchinp=3);
+  real GetEOCBurnup();
+  real GetAtomWiseWeightAtBOC(Burnup &bu,int atm);
+  real GetAtomWiseWeightAtEOC(Burnup &bu,int atm);
+  // +++ (For lumped-FP creation)
+  void CreatePseudoFP(Burnup &bu,string fissle_name,int nucnum,string *nucname,int outid,string outname);
+  void LFP(Burnup &bu,string fissle_name,int nucnum,string *nucname);
+  void ShowPseudoFPCrossSection(Burnup &bu,int nucnum,string *nucname);
+  // +++ (For burnup matrix extraction)
+  void SetMatrixExtraction(string filename="matdat",int prc=16){matrix_extract=true; mat_ext_filename=filename; mat_ext_prc=prc;};
+  // +++ (Printing calculation result)
+  void ShowEigenvalue();
+  void ShowNeutronFluxHistory();
+  //void ShowDecayHeat(Burnup &bu,bool detail_print=true,real factor=1.); 
+  //void ShowRadioactivity(Burnup &bu,bool detail_print=true,real factor=1.); 
+  //void ShowDecayHeatAtomWise(Burnup &bu,string atom_name,real factor=1.);
+  void ShowNumberDensityChange(real limit=0.);
+  void ShowNumberDensityChange(int nucnum, string *nuclist);
+  void ShowWeightChange(Burnup &bu, real limit=0.);
+  void ShowNumberDensityHistoryAtomWise(string atom_name,Burnup &bu,string opt="nd_per_vol",bool sum_only=false);
+  void ShowNumberDensityHistoryOld(int prt_nuc, string *prt_nuc_nam,Burnup &bu,string opt="nd_per_vol",bool sum_only=false);
+  void ShowNumberDensityHistory(int prt_nuc, string *prt_nuc_nam,Burnup &bu,string opt="nd_per_vol",bool sum_only=false);
+  void ShowPlutonium(Burnup &bu);
+  void ShowMA(Burnup &bu);
+  void ShowCrossSection(int prt_nuc,string *prt_nuc_nam);
+  void ShowCrossSection(int step);
+  void ShowGroupDependentCrossSection(string nucname,bool excel=false);
+  void ShowGroupDependentCrossSectionExcel(string nucname){ShowGroupDependentCrossSection(nucname,true);};
+  void ShowCaptureToDecayRatio(int prt_nuc,string *prt_nuc_nam,Burnup &bu);
+  void ShowAdjointNumberDensity(int prt_nuc,string *prt_nuc_nam);
+  void ShowFuelNeutronFlux(int step,bool excel=false);  
+  void ShowFuelNeutronFluxExcel(int step){ShowFuelNeutronFlux(step,true);};
+  void ShowHeavyMetalWeightRatio(Burnup &bu);
+  void ShowNuclideWiseContributionForFission(int prt_nuc,string *prt_nuc_nam);
+  void ShowRadioactivityRatio(Burnup &bu,string nuc1,string nuc2);
+  real GetRadioactivityRatio(Burnup &bu,string nuc1,string nuc2);
+  real GetRadioactivity(Burnup &bu,string nuc1);
+  void GetPrintNuclide(int prt_nuc,string *prt_nuc_nam,vector<int> &prt_nuc_turn);
+  // +++ (Animation)
+  void ShowRadioactivityHistoryForAnimation(Burnup &bu);
+  void ShowDataForAnimation(Burnup &bu,string filename,string type="nd");
+  void ShowDataForAnimationNew(Burnup &bu,string filename,string type="nd");
+};
+
+
+#endif
+
+

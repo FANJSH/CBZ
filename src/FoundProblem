@@ -1,0 +1,6 @@
+********************************************************
+07/24/2006  SNR
+
+   Solution of P1 in forward calculation is inconsistent
+with that in adjoint calculation for FLATTOP-Pu core.
+********************************************************

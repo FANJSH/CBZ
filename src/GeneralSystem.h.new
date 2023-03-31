@@ -1,0 +1,207 @@
+#ifndef GENERALSYSTEM
+#define GENERALSYSTEM
+
+#include <time.h>
+#include <string>
+#include <math.h>
+#include <vector>
+#include <iostream>
+#include "Medium.h"
+#include "CartMeshInfo.h"
+#include "GeneralOption.h"
+#include "GeneralMesh.h"
+#include "DelayedNeutronData.h"
+#include "DelayedNeutronData.h"
+
+using namespace std;
+
+class GeneralSystem{
+ protected:
+  int MAX_MED, nmed, grp, Ndim;
+  int TotM, CTotM;
+  int pl, plnum;
+  vector<GeneralMesh> mesh;
+  vector<Medium> med;
+  GeneralOption opt;
+  bool cmfdimp, cmfd;
+  CartMeshInfo mi;
+  string name;
+  vector< vector< vector<int> > > meshid; //[z][y][x]
+  vector< vector< vector<int> > > cmeshid; //[x][y][z]
+  vector<int> xedgel;
+  vector<int> xedger;
+  vector<int> yedgel;
+  vector<int> yedger;
+  vector< vector< vector< vector<int> > > > edge;
+  int UpScatteringGrp,ThermalIteration;
+  int UpScatSrcGrp,UpScatSinkGrp;
+  bool IsUpScatterSystem;
+  bool print;
+  real cmfd_factor;
+  int out_iter_end;
+  int iter_init;
+ public:
+  GeneralSystem(){};
+  GeneralSystem(int n,int g, int i){Init(n,g,i);};
+  virtual ~GeneralSystem(){};
+  void Init(int n,int g,int i);
+
+  void AddMedium(Medium inp);
+  void AddMedium(string mdir,string ss,int plt=1,bool upscat=false);
+  void EdgeCalculation();
+  void SetCoarseMeshInfo();
+  void UnifyFissionSpectrum(int i);
+
+  // +++ For perturbation calculations
+  void CheckSameMesh(GeneralSystem *sec);
+  void CheckAdjointForward(GeneralSystem *sec);
+  real CalPerturbDenominator(GeneralSystem *sec);
+  real CalPerturbDenominatorWithFissionSpectrumMatrix(GeneralSystem *sec);
+  real CalPerturbDenominatorFromSource(GeneralSystem *sec);
+  void CalPerturbYieldTerm(GeneralSystem *sec,bool *flag,real *val,real kp);
+  real CalPerturbYieldTerm(GeneralSystem *sec,bool *flag,int g,real kp);
+  real CalPerturbYieldTerm(GeneralSystem *sec,int m,int g,real kp);
+  real CalPerturbYieldTermWithFissionSpectrumMatrix(GeneralSystem *sec,bool *flag,int g,real kp);
+  void CalPerturbAbsorptionTerm(GeneralSystem *sec,bool *flag,real *val);
+  real CalPerturbAbsorptionTerm(GeneralSystem *sec,bool *flag,int g);
+  real CalPerturbAbsorptionTerm(GeneralSystem *sec,int m,int g);
+  real CalPerturbN2NTerm(GeneralSystem *sec,bool *flag,int g);
+  real CalPerturbN2NTerm(GeneralSystem *sec,int m,int g);
+  real CalPerturbScatteringTermDiffusion(GeneralSystem *sec,bool *flag,int g1,int g2);
+  real CalPerturbScatteringTermDiffusion(GeneralSystem *sec,bool *flag,int g);
+  real CalPerturbScatteringTermDiffusion(GeneralSystem *sec,int m,int g);
+
+  // +++ For kinetics parameters calculations
+  real CalBetaEffective(GeneralSystem *sec,DelayedNeutronData &dnd,bool print=true,bool fismat=false);
+  real CalBetaEffectiveWithFissionSpectrumMatrix(GeneralSystem *sec,DelayedNeutronData &dnd,bool print=true)
+     {return CalBetaEffective(sec,dnd,print,true);};
+  real CalFundamentalBeta(DelayedNeutronData &dnd,bool print=true);
+  real CalNeutronLifeTime(GeneralSystem *src,bool fismat=false);
+
+  // +++ For power iteration
+  real CalIgen(string accel="extrapolation",real maxval=0.95);
+  real CalIgenWithFissionSpectrumMatrix();
+  real CalIgenGroupParallel();
+  real CalIgenNormal(int pl);
+  real CalIgenChebychev(int pl,real maxval);
+  real CalIgenExtrapolation(int pl);
+  virtual real CalFluxGeneral(int g,real cin,int it){return 0;};
+  virtual void SetInitialFlux(){};
+  virtual void DoAcceleration(int it,real errf,real k){};
+  real GetFissionSum();
+  void WriteIterationInfo(int iter,real fiss,real errk,real errf,real errs);
+  void CalSrcMultiplySystem(int g,real keff,int pl);
+  void CalFissionSrcAllMesh();
+  void NormalizeFissionSrc();
+  void SetInitialFlatFlux(real inp=1.);
+  void AddDownScatSrc(int g,int pl,bool selfscat=false);
+  void AddDownScatSrcReactionWise(int g,int pl,enum xstype xst,bool selfscat=false);
+  void AddUpScatSrc(int g,int pl);
+  void SetZeroScatSrc(int g);
+  void SetZeroScatSrc();
+  void SetZeroFissionSrc();
+  void SetZeroUpScatSrc(int g);
+  void SetZeroScalarFlux();
+  void SetZeroScalarFlux(int g);
+  void NoPrint(){print=false;};
+
+  // +++ For calculation with flux distribution
+  void CalReactionRate(int x1,int x2,int y1,int y2,int z1,int z2,int matnum,enum xstype react,bool normalize=true);
+  void CalReactionRate(int x1,int x2,int y1,int y2,int z1,int z2,int matnum,enum xstype react,vector<real>&rra,bool normalize=true);
+  real CalMacroscopicReactionRate(int nuc,int *nuc_id,enum xstype *xs);
+  real CalMacroscopicReactionRate(int nuc,int *nuc_id,enum xstype *xs,bool *on_mesh);
+  real CalConversionRatio();
+  void CalReactionRateRatio(int x1,int x2,int y1,int y2,int z1,int z2,int matnum,enum xstype react,int matnum2,enum xstype react2);
+  real CalPointReactionRateRatio(int x,int y,int z,int matnum,enum xstype react,int matnum2,enum xstype react2);
+  void CalPowerXY();
+  void ShowFissionSourceForXYPlot(int z=0);
+  void CalAxialPowerDistribution(int x,int y);
+  GroupData1D GetIntegratedFlux(int medid,int mom=0);
+  GroupData1D GetIntegratedFluxParVolume(int medid,int mom=0);
+  GroupData1D GetIntegratedFlux(int x1,int x2,int y1,int y2,int z1=0,int z2=0,int mom=0);
+  GroupData1D GetIntegratedFluxPerVolume(int x1,int x2,int y1,int y2,int z1=0,int z2=0,int mom=0);
+  GroupData1D GetIntegratedFluxMeshID(int m1,int m2);
+  void ShowIntegratedFlux(int medid,int mom=0);
+  void ShowIntegratedFluxMeshID(int m1,int m2);
+  void ShowIntegratedFlux(GroupData1D &flx);
+  void ShowNeutronFluxAlongXAxis(int y,int z,int g);
+  GroupData1D GetIntegratedReactionRate(enum xstype react,int medid=-1);
+  GroupData1D GetIntegratedReactionRatePerMesh(enum xstype react,int meshid=-1);
+  real GetVolumeParMedium(int medid){return GetVolumePerMedium(medid);};
+  real GetVolumePerMedium(int medid);
+  void FluxNormalization(real factor);
+  real CalPositionReactionRate(real x,real y,real z,int matnum,enum xstype react);
+  GroupData1D GetPositionFlux(real x,real y,real z);
+
+  virtual void FluxAngleReverse(){};
+
+  // +++ For fixed source calculation
+  void PutIsotropicSourceParVolume(int x1,int x2,int y1,int y2,int z1,int z2,GroupData1D &src,int mom=0)
+  {PutIsotropicSourcePerUnitVolume(x1,x2,y1,y2,z1,z2,src,mom);}; 
+  void PutIsotropicSourceParVolume(int mesh_id,GroupData1D &src,int mom=0)
+  {PutIsotropicSourcePerUnitVolume(mesh_id,src,mom);};
+  void PutIsotropicSourcePerUnitVolume(int x1,int x2,int y1,int y2,int z1,int z2,GroupData1D &src,int mom=0); 
+  void PutIsotropicSourcePerUnitVolume(int mesh_id,GroupData1D &src,int mom=0); 
+  void CalFixedSource(real epsf=1e-4,int oiter=1,bool print=true);
+  void CalFixedSourceUpScat();
+  void CalFixedFissionSourceUpScat(real k=1.);
+  void CalFixedFissionSource(real k=1.);
+  real CalFixedSourceWithFission(real epsf,int itermax,bool high_speed_option);
+  // +++ For GPT calculation
+  void CalGPT(real keff,int nuc,int *nuc_id,enum xstype *xs,bool *on_mesh,real rr);
+  void CalGPTForFissionSource(real keff,real rr,bool subcritical=false);
+  void CalGPTForFissionReactionRate(real keff,real rr,bool subcritical=false);
+  void CalGPTForFissionSourceDelayed(real keff,real rr,DelayedNeutronData& dnd,bool subcritical=false);
+  void CalGPT(real keff,int nuc,int *nuc_id,enum xstype *xs,bool *on_mesh);
+  void CalGPT(real keff,real eps_f=1e-4,int itermax=20);
+
+  void CheckUpScattering();
+  void PutThermalIteration(int i){ThermalIteration=i;};
+
+  // for source extrapolation acceleration
+  real SourceAndResidualRevision(vector<real> &fsold, vector<real> &res);
+  void SourceExtrapolation(vector<real> &fsold, real omega);
+  void WriteSourceExtrapolationInfo(real lambda,real omega);
+  real GetSourceError(vector<real> &fsold);
+
+  void PutCMFDFactor(real i){cmfd_factor=i;};
+
+  // Access function (input)
+  void PutGeneralOption(GeneralOption inp);
+  void PutPL(int l);
+  void PutNdim(int i);
+  void PutIterInit(int i){iter_init=i;};
+
+  // Access function (output)
+  int GetGrp(){return grp;};
+  int GetPL(){return pl;};
+  int GetPLnum(){return plnum;};
+  int GetNdim(){return Ndim;};
+  int GetTotM(){return TotM;};
+  int GetNmed(){return nmed;};
+  int GetMeshID(int x,int y,int z){return meshid[z][y][x];};
+  int GetOutIterEnd(){return out_iter_end;};
+  Medium &GetMed(int i){return med[i];};
+  Medium &GetMedium(int i){return med[i];};
+  GeneralMesh &GetMesh(int i){return mesh[i];};
+  GeneralMesh &GetMesh(int x,int y,int z=0){return mesh[meshid[z][y][x]];};
+  CartMeshInfo GetMI(){return mi;}; 
+  GeneralOption GetGeneralOption(){return opt;};
+  void MedClear(){med.clear();};
+  void MeshClear(){mesh.clear();};
+
+  void WriteSolverName(string acname);
+  void WritePerturbName();
+
+  Medium Homogenize(int hreg,int *nreg);
+  real GetNeutronMultiplicationInfo(real keff);
+  void GetNeutronMultiplicationDetailedInfo();
+  void GetNuclideWiseAbsorptionRate(int nuc,int *nucid);
+
+  void AllVectorClear();
+
+  void AddFlux(GeneralSystem &sec);
+  void NegFlux(GeneralSystem &sec,real factor=1.);
+};
+
+#endif

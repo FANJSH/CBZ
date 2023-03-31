@@ -1,0 +1,2046 @@
+#include "BurnupChain.h"
+
+// ++++++++++++++++++++++++++++++
+//   NuclideChainData
+// ++++++++++++++++++++++++++++++
+
+NuclideChainData::NuclideChainData()
+{
+  id=-1;
+  // fission, capture, n2n, decay
+  ndiv.resize(4);
+  ratio.resize(4);
+  idnext.resize(4);
+  decay_energy.resize(3);
+};
+
+void NuclideChainData::PutID(int i)
+{
+  id=i;
+};
+
+void NuclideChainData::PutNdiv(int i,int j)
+{
+  if(i<0||i>3){
+    cout<<"# Error in NuclideChainData::PutNdiv.\n";
+    exit(0);
+  };
+  ndiv[i]=j;
+  ratio[i].resize(j);
+  idnext[i].resize(j);
+  if(j==1){
+    ratio[i][0]=1.;
+  };
+};
+
+void NuclideChainData::PutNdiv(int *in)
+{
+  for(int i=0;i<4;i++){
+    PutNdiv(i,in[i]);
+  };
+
+  // Default setting for capture 
+  if(ndiv[1]==1){
+    idnext[1][0]=id+3;
+  };
+  // Default setting for n2n
+  if(ndiv[2]==1){
+    idnext[2][0]=id-3;
+  };
+  // Default setting for alpha-decay
+  if(ndiv[3]==1){
+    idnext[3][0]=id-209;
+  };
+};
+
+void NuclideChainData::PutNdiv(int i1,int i2,int i3,int i4)
+{
+  int *in=new int[4];
+  in[0]=i1;
+  in[1]=i2;
+  in[2]=i3;
+  in[3]=i4;
+  PutNdiv(in);
+  delete [] in;
+};
+
+void NuclideChainData::PutData(int in,real *rin,int *idin)
+{
+  for(int i=0;i<ndiv[in];i++){
+    ratio[in][i]=rin[i];
+    idnext[in][i]=idin[i];
+  };
+};
+
+void NuclideChainData::PutData(int in,real rin,int idin)
+{
+  ratio[in][0]=rin;
+  idnext[in][0]=idin;
+};
+
+void NuclideChainData::ShowFissionYieldData(ENDFIDTranslator &eidt)
+{
+  cout.setf(ios::scientific);
+  cout.precision(5);
+  for(int i=0;i<ndiv[0];i++){
+    cout<<eidt.Name(idnext[0][i])<<" "<<idnext[0][i]<<" "<<ratio[0][i]<<"\n";
+  };
+};
+
+// ++++++++++++++++++++++++++
+//    BurnupChain
+// ++++++++++++++++++++++++++
+
+BurnupChain::BurnupChain()
+{
+  read_decay_constant=false;
+};
+
+void BurnupChain::PutNdiv(string nuc,int i1,int i2,int i3,int i4)
+{
+  int id=ID(nuc);
+  data[id].PutNdiv(i1,i2,i3,i4);
+};
+
+void BurnupChain::PutIDnextDecay(string nuc,string nuc2)
+{
+  int id=ID(nuc);
+  int id2=ID(nuc2);
+  data[id].PutIDnextDecay(id2);
+};
+
+void BurnupChain::PutIDnextCapture(string nuc,string nuc2)
+{
+  int id=ID(nuc);
+  int id2=ID(nuc2);
+  data[id].PutIDnextCapture(id2);
+};
+
+void BurnupChain::PutIDnextN2N(string nuc,string nuc2)
+{
+  int id=ID(nuc);
+  int id2=ID(nuc2);
+  data[id].PutIDnextN2N(id2);
+};
+
+void BurnupChain::PutData(string nuc,int in,real *rin,string *nuc2)
+{
+  int id=ID(nuc);
+  int ndiv=data[id].GetNdiv(in);
+  int *idin=new int[ndiv];
+  for(int i=0;i<ndiv;i++){
+    idin[i]=ID(nuc2[i]);
+  };
+  data[id].PutData(in,rin,idin);
+  delete [] idin;
+};
+
+void BurnupChain::SetDefault()
+{
+  int fpid_u5=9995;
+  int fpid_u8=9998;
+  int fpid_p1=9991;
+  int fpid_p9=9999;
+  // u-235
+  data[9228].PutID(9228);
+  data[9228].PutNdiv(1,1,0,0); // f,c,2n,d
+  data[9228].PutData(0,1.,fpid_u5);
+  // u-236
+  data[9231].PutID(9231);
+  data[9231].PutNdiv(1,1,1,0);
+  data[9231].PutData(0,1.,fpid_u5);
+  data[9231].PutData(1,1.,9237);
+  // u-238
+  data[9237].PutID(9237);
+  data[9237].PutNdiv(1,1,1,0);
+  data[9237].PutData(0,1.,fpid_u8);
+  data[9237].PutData(1,1.,9437);
+  data[9237].PutData(2,1.,9346);
+  // np-237
+  data[9346].PutID(9346);
+  data[9346].PutNdiv(1,1,0,0);
+  data[9346].PutData(0,1.,fpid_u8);
+  data[9346].PutData(1,1.,9434);
+  // pu-238
+  data[9434].PutID(9434);
+  data[9434].PutNdiv(1,1,0,0);
+  data[9434].PutData(0,1.,fpid_u8);
+  // pu-239
+  data[9437].PutID(9437);
+  data[9437].PutNdiv(1,1,1,1);
+  data[9437].PutData(0,1.,fpid_p9);
+  // pu-240
+  data[9440].PutID(9440);
+  data[9440].PutNdiv(1,1,1,1);
+  data[9440].PutData(0,1.,fpid_p9);
+  // pu-241
+  data[9443].PutID(9443);
+  data[9443].PutNdiv(1,1,1,1);
+  data[9443].PutData(0,1.,fpid_p1);
+  data[9443].PutData(3,1.,9543); // beta-decay
+  // pu-242
+  data[9446].PutID(9446);
+  data[9446].PutNdiv(1,1,1,1);
+  data[9446].PutData(0,1.,fpid_p1);
+  data[9446].PutData(1,1.,9549);
+  // am-241
+  data[9543].PutID(9543);
+  data[9543].PutNdiv(1,3,0,1);
+  data[9543].PutData(0,1.,fpid_p1);
+  real rin0[]={0.15, 0.70295, 0.14705};
+  int din0[]={9547, 9631, 9446};
+  data[9543].PutData(1,rin0,din0);
+  data[9543].PutData(3,1.,9346);
+  // am-242m
+  data[9547].PutID(9547);
+  data[9547].PutNdiv(1,1,1,1);
+  data[9547].PutData(0,1.,fpid_p1);
+  data[9547].PutData(1,1.,9549);
+  data[9547].PutData(2,1.,9543);
+  data[9547].PutData(3,1.,9631);
+  // am-243
+  data[9549].PutID(9549);
+  data[9549].PutNdiv(1,1,1,1);
+  data[9549].PutData(0,1.,fpid_p1);
+  data[9549].PutData(1,1.,9637);
+  data[9549].PutData(2,1.,9547);
+  data[9549].PutData(3,1.,9437);
+  // cm-242
+  data[9631].PutID(9631);
+  data[9631].PutNdiv(1,1,0,1);
+  data[9631].PutData(0,1.,fpid_p1);
+  data[9631].PutData(3,1.,9434);
+  // cm-243
+  data[9634].PutID(9634);
+  data[9634].PutNdiv(1,1,1,1);
+  data[9634].PutData(0,1.,fpid_p1);
+  data[9634].PutData(3,1.,9437);
+  // cm-244
+  data[9637].PutID(9637);
+  data[9637].PutNdiv(1,1,1,1);
+  data[9637].PutData(0,1.,fpid_p1);
+  data[9637].PutData(3,1.,9440);
+  // cm-245
+  data[9640].PutID(9640);
+  data[9640].PutNdiv(1,1,1,1);
+  data[9640].PutData(0,1.,fpid_p1);
+  data[9640].PutData(3,1.,9443);
+  // cm-246
+  data[9643].PutID(9643);
+  data[9643].PutNdiv(1,0,1,1);
+  data[9643].PutData(0,1.,fpid_p1);
+  data[9643].PutData(3,1.,9446);
+  // fp-u5
+  data[fpid_u5].PutID(fpid_u5);
+  data[fpid_u5].PutNdiv(0,1,1,1); // f,c,2n,d
+  data[fpid_u5].PutData(1,1.,fpid_u5);
+  data[fpid_u5].PutData(2,1.,fpid_u5);
+  data[fpid_u5].PutData(3,1.,fpid_u5);
+  // fp-u8
+  data[fpid_u8].PutID(fpid_u8);
+  data[fpid_u8].PutNdiv(0,1,1,1); // f,c,2n,d
+  data[fpid_u8].PutData(1,1.,fpid_u8);
+  data[fpid_u8].PutData(2,1.,fpid_u8);
+  data[fpid_u8].PutData(3,1.,fpid_u8);
+  // fp-p9
+  data[fpid_p9].PutID(fpid_p9);
+  data[fpid_p9].PutNdiv(0,1,1,1); // f,c,2n,d
+  data[fpid_p9].PutData(1,1.,fpid_p9);
+  data[fpid_p9].PutData(2,1.,fpid_p9);
+  data[fpid_p9].PutData(3,1.,fpid_p9);
+  // fp-p1
+  data[fpid_p1].PutID(fpid_p1);
+  data[fpid_p1].PutNdiv(0,1,1,1); // f,c,2n,d
+  data[fpid_p1].PutData(1,1.,fpid_p1);
+  data[fpid_p1].PutData(2,1.,fpid_p1);
+  data[fpid_p1].PutData(3,1.,fpid_p1);
+};
+
+void BurnupChain::SetOKUMURAChainFine()
+{
+  // SRAC : fp193bp6 chain
+
+  string hm_name[]={
+   "U234","U235","U236","U237","U238",
+   "Np237","Np239",
+   "Pu238","Pu239","Pu240","Pu241","Pu242",
+   "Am241","Am242","Am242m","Am243",
+   "Cm242","Cm243","Cm244","Cm245","Cm246",
+  };
+  string fp_name[]={
+   "Ge073","Ge074","Ge076",
+   "As075",
+   "Se076","Se077","Se078","Se079","Se080","Se082",
+   "Br081",
+   "Kr082","Kr083","Kr084","Kr085","Kr086",
+   "Rb085","Rb086","Rb087",
+   "Sr086","Sr087","Sr088","Sr089","Sr090",
+   "Y089","Y090","Y091",
+   "Zr090","Zr091","Zr092","Zr093","Zr094","Zr095","Zr096",
+   "Nb093","Nb093m","Nb094","Nb095",
+   "Mo092","Mo094","Mo095","Mo096","Mo097","Mo098","Mo099","Mo100",
+   "Tc099",
+   "Ru100","Ru101","Ru102","Ru103","Ru104","Ru105","Ru106",
+   "Rh103","Rh105","Rh106",
+   "Pd104","Pd105","Pd106","Pd107","Pd108","Pd110",
+   "Ag107","Ag109","Ag110m",
+   "Cd110","Cd111","Cd112","Cd113","Cd113m","Cd114","Cd116",
+   "In113","In115",
+   "Sn116","Sn117","Sn118","Sn119","Sn119m","Sn120","Sn121","Sn121m","Sn122","Sn123","Sn124","Sn126",
+   "Sb121","Sb123","Sb124","Sb125","Sb126","Sb126m",
+   "Te122","Te123","Te123m","Te124","Te125","Te125m","Te126","Te127m","Te128","Te129m","Te130","Te132",
+   "I127","I129","I130","I131","I135",
+   "Xe126","Xe128","Xe129","Xe130","Xe131","Xe132","Xe133","Xe134","Xe135","Xe136",
+   "Cs133","Cs134","Cs135","Cs136","Cs137",
+   "Ba134","Ba135","Ba136","Ba137","Ba137m","Ba138","Ba140",
+   "La139","La140",
+   "Ce140","Ce141","Ce142","Ce143","Ce144",
+   "Pr141","Pr143","Pr144",
+   "Nd142","Nd143","Nd144","Nd145","Nd146","Nd147","Nd148","Nd150",
+   "Pm147","Pm148","Pm148m","Pm149","Pm151", 
+   "Sm147","Sm148","Sm149","Sm150","Sm151","Sm152","Sm153","Sm154",
+   "Eu151","Eu152","Eu153","Eu154","Eu155","Eu156","Eu157",
+   "Gd152","Gd154","Gd155","Gd156","Gd157","Gd158","Gd160",
+   "Tb159","Tb160",
+   "Dy160","Dy161","Dy162","Dy163","Dy164",
+   "Ho163","Ho165","Ho166m",
+   "Er162","Er164","Er166","Er167","Er168","Er170",
+   "Hf176","Hf177","Hf178","Hf179","Hf180",
+  };
+
+  int hm_num=5+2+5+4+5; 
+  int ii=0;
+  bool flagend=false;
+  while(!flagend){
+    if(fp_name[ii]=="Hf180"){
+      flagend=true;
+    };
+    ii++;
+  };
+  int fp_num=ii;
+
+  for(int i=0;i<hm_num;i++){
+    int id=ID(hm_name[i]);
+    data[id].PutID(id);
+  };
+  for(int i=0;i<fp_num;i++){
+    int id=ID(fp_name[i]);
+    data[id].PutID(id);
+  };
+
+  // u-234
+  data[9225].PutNdiv(fp_num,1,0,0);
+  // u-235
+  data[9228].PutNdiv(fp_num,1,1,0); // f,c,2n,d
+  // u-236
+  data[9231].PutNdiv(fp_num,1,1,0);
+  // u-237
+  data[9234].PutNdiv(fp_num,1,1,1);
+  data[9234].PutIDnextDecay(9346); // beta-
+  // u-238
+  data[9237].PutNdiv(fp_num,1,1,0);
+  data[9237].PutIDnextCapture(9352);
+  // np-237
+  data[9346].PutNdiv(fp_num,1,1,0);
+  data[9346].PutIDnextCapture(9434);
+  data[9346].PutIDnextN2N(9234);
+  // np-239
+  data[9352].PutNdiv(fp_num,1,0,1);
+  data[9352].PutIDnextCapture(9440);
+  data[9352].PutIDnextDecay(9437);
+  // pu-238
+  data[9434].PutNdiv(fp_num,1,0,1);
+  data[9434].PutIDnextDecay(9225);
+  // pu-239
+  data[9437].PutNdiv(fp_num,1,1,1);
+  data[9437].PutIDnextDecay(9228);
+  // pu-240
+  data[9440].PutNdiv(fp_num,1,1,1);
+  data[9440].PutIDnextDecay(9231);
+  // pu-241
+  data[9443].PutNdiv(fp_num,1,1,2);
+  real r_p1_d[]={0.999975, 0.000025};
+  int id_p1_d[]={9543,9234};
+  data[9443].PutData(3,r_p1_d,id_p1_d);
+  // pu-242
+  data[9446].PutNdiv(fp_num,1,1,1);
+  data[9446].PutIDnextCapture(9549);
+  data[9446].PutIDnextDecay(9237);
+  // am-241
+  data[9543].PutNdiv(fp_num,2,0,1);
+  real r_a1_c[]={0.1164,0.8836};
+  int id_a1_c[]={9547, 9546};
+  data[9543].PutData(1,r_a1_c,id_a1_c);
+  data[9543].PutIDnextDecay(9346);
+  // am-242
+  data[9546].PutNdiv(fp_num,1,0,2);
+  real r_a2_d[]={0.173, 0.827};
+  int id_a2_d[]={9446,9631};
+  data[9546].PutData(3,r_a2_d,id_a2_d);
+  // am-242m
+  data[9547].PutNdiv(fp_num,1,1,1);
+  data[9547].PutIDnextDecay(9546);
+  data[9547].PutIDnextCapture(9549);
+  data[9547].PutIDnextN2N(9543);
+  // am-243
+  data[9549].PutNdiv(fp_num,1,1,1);
+  data[9549].PutIDnextDecay(9352);
+  data[9549].PutIDnextCapture(9637);
+  // cm-242
+  data[9631].PutNdiv(fp_num,1,0,1);
+  data[9631].PutIDnextDecay(ID("Pu238"));
+  // cm-243
+  data[9634].PutNdiv(fp_num,1,1,1);
+  data[9634].PutIDnextDecay(ID("Pu239"));
+  // cm-244
+  data[9637].PutNdiv(fp_num,1,1,1);
+  data[9637].PutIDnextDecay(ID("Pu240"));
+  // cm-245
+  data[9640].PutNdiv(fp_num,1,1,1);
+  data[9640].PutIDnextDecay(ID("Pu241"));
+  // cm-246
+  data[9643].PutNdiv(fp_num,1,1,1);
+  data[9643].PutIDnextDecay(ID("Pu242"));
+  //
+  // +++ FP
+  // Ge73
+  PutNdiv("Ge073",0,1,0,0); // f,c,2n,d
+  // Ge74
+  PutNdiv("Ge074",0,1,0,0);
+  PutIDnextCapture("Ge074","As075");
+  // As75
+  // (In SRAC, path to Ge076 is neglected.)
+  PutNdiv("As075",0,2,0,0);
+  real r_as5_c[]={0.9998,0.0002};
+  string nuc_as5_c[]={"Se076","Ge076"};
+  PutData("As075",1,r_as5_c,nuc_as5_c);
+  // Se76
+  PutNdiv("Se076",0,1,0,0);
+  // Se77
+  PutNdiv("Se077",0,1,0,0);
+  // Se78
+  PutNdiv("Se078",0,1,0,0);
+  // Se79
+  PutNdiv("Se079",0,1,0,0);
+  // Se80
+  PutNdiv("Se080",0,1,0,0);
+  PutIDnextCapture("Se080","Br081");
+  // Br81
+  data[ID("Br081")].PutNdiv(0,1,0,0);
+  data[ID("Br081")].PutIDnextCapture(ID("Kr082"));
+  // Kr82
+  data[ID("Kr082")].PutNdiv(0,1,0,0);
+  // Kr83
+  data[ID("Kr083")].PutNdiv(0,1,0,0);
+  // Kr84
+  data[ID("Kr084")].PutNdiv(0,2,0,0);
+  real r_kr84_c[]={0.53652, 0.46348};
+  //real r_kr84_c[]={0.043,0.9455}; // FAST
+  string nuc_kr84_c[]={"Rb085","Kr085"};
+  PutData("Kr084",1,r_kr84_c,nuc_kr84_c);
+  // Kr85 
+  data[ID("Kr085")].PutNdiv(0,1,0,1);
+  data[ID("Kr085")].PutIDnextDecay(ID("Rb085"));
+  // Kr86
+  data[ID("Kr086")].PutNdiv(0,1,0,0);
+  data[ID("Kr086")].PutIDnextCapture(ID("Rb087"));
+  // Rb85
+  data[ID("Rb085")].PutNdiv(0,1,0,0);
+  // Rb86
+  data[ID("Rb086")].PutNdiv(0,1,0,1);
+  data[ID("Rb086")].PutIDnextDecay(ID("Sr086"));
+  // Rb87
+  data[ID("Rb087")].PutNdiv(0,1,0,1);
+  data[ID("Rb087")].PutIDnextCapture(ID("Sr088"));
+  data[ID("Rb087")].PutIDnextDecay(ID("Sr087"));
+  // Sr86
+  data[ID("Sr086")].PutNdiv(0,2,0,0);
+  real r_sr6_c[]={0.997576,0.002424};
+  int id_sr6_c[]={ID("Sr087"),ID("Rb087")};
+  data[ID("Sr086")].PutData(1,r_sr6_c,id_sr6_c);
+  // Sr87
+  data[ID("Sr087")].PutNdiv(0,1,0,0);
+  // Sr88
+  data[ID("Sr088")].PutNdiv(0,1,0,0);
+  // Sr89
+  data[ID("Sr089")].PutNdiv(0,1,0,1);
+  data[ID("Sr089")].PutIDnextDecay(ID("Y089"));
+  // Sr90
+  data[ID("Sr090")].PutNdiv(0,1,0,1);
+  data[ID("Sr090")].PutIDnextCapture(ID("Y091"));
+  data[ID("Sr090")].PutIDnextDecay(ID("Y090"));
+  // Y89
+  data[ID("Y089")].PutNdiv(0,2,0,0);
+  real r_y9_c[]={0.99999812,0.00000188};
+  int id_y9_c[]={ID("Y090"),ID("Zr090")};
+  data[ID("Y089")].PutData(1,r_y9_c,id_y9_c);
+  // Y90
+  data[ID("Y090")].PutNdiv(0,1,0,1);
+  data[ID("Y090")].PutIDnextDecay(ID("Zr090"));
+  // Y91
+  data[ID("Y091")].PutNdiv(0,1,0,1);
+  data[ID("Y091")].PutIDnextCapture(ID("Zr092"));
+  data[ID("Y091")].PutIDnextDecay(ID("Zr091"));
+  // Zr90
+  data[ID("Zr090")].PutNdiv(0,1,0,0);
+  // Zr91
+  data[ID("Zr091")].PutNdiv(0,1,0,0);
+  // Zr92
+  data[ID("Zr092")].PutNdiv(0,1,0,0);
+  // Zr93
+  data[ID("Zr093")].PutNdiv(0,1,0,2);
+  real r_zr3_d[]={0.05,0.95};
+  int id_zr3_d[]={ID("Nb093"),ID("Nb093m")};
+  data[ID("Zr093")].PutData(3,r_zr3_d,id_zr3_d);
+  // Zr94
+  data[ID("Zr094")].PutNdiv(0,1,0,0);
+  // Zr95
+  data[ID("Zr095")].PutNdiv(0,1,0,2);
+  real r_zr5_d[]={0.999775,0.000225};
+  int id_zr5_d[]={ID("Nb095"),ID("Mo095")};
+  data[ID("Zr095")].PutData(3,r_zr5_d,id_zr5_d);
+  // Zr96
+  // Nb93
+  data[ID("Nb093")].PutNdiv(0,1,0,0);
+  // Nb93m
+  data[ID("Nb093m")].PutNdiv(0,0,0,1);
+  data[ID("Nb093m")].PutIDnextDecay(ID("Nb093"));
+  // Nb94
+  data[ID("Nb094")].PutNdiv(0,2,0,1);
+  real r_nb4_c[]={0.999025, 0.000975};
+  string nuc_nb4_c[]={"Nb095","Mo095"};
+  PutData("Nb094",1,r_nb4_c,nuc_nb4_c);
+  data[ID("Nb094")].PutIDnextDecay(ID("Mo094"));
+  // Nb95
+  data[ID("Nb095")].PutNdiv(0,1,0,1);
+  data[ID("Nb095")].PutIDnextCapture(ID("Mo096"));
+  data[ID("Nb095")].PutIDnextDecay(ID("Mo095"));
+  // Mo92
+  data[ID("Mo092")].PutNdiv(0,2,0,0);
+  real r_mo2_c[]={0.1, 0.9};
+  string nuc_mo2_c[]={"Nb093","Nb093m"};
+  PutData("Mo092",1,r_mo2_c,nuc_mo2_c);
+  // Mo94
+  data[ID("Mo094")].PutNdiv(0,1,0,0);
+  // Mo95
+  data[ID("Mo095")].PutNdiv(0,1,0,0);
+  // Mo96
+  data[ID("Mo096")].PutNdiv(0,1,0,0);
+  // Mo97
+  data[ID("Mo097")].PutNdiv(0,1,0,0);
+  // Mo98
+  data[ID("Mo098")].PutNdiv(0,1,0,0);
+  // Mo99
+  data[ID("Mo099")].PutNdiv(0,1,0,1);
+  data[ID("Mo099")].PutIDnextDecay(ID("Tc099"));
+  // Mo100
+  // Tc99
+  data[ID("Tc099")].PutNdiv(0,1,0,0);
+  data[ID("Tc099")].PutIDnextCapture(ID("Ru100"));
+  // Ru100
+  data[ID("Ru100")].PutNdiv(0,1,0,0);
+  // Ru101
+  data[ID("Ru101")].PutNdiv(0,1,0,0);
+  // Ru102
+  data[ID("Ru102")].PutNdiv(0,1,0,0);
+  // Ru103
+  data[ID("Ru103")].PutNdiv(0,1,0,1);
+  data[ID("Ru103")].PutIDnextDecay(ID("Rh103"));
+  // Ru104
+  data[ID("Ru104")].PutNdiv(0,1,0,0);
+  // Ru105
+  data[ID("Ru105")].PutNdiv(0,1,0,1);
+  data[ID("Ru105")].PutIDnextDecay(ID("Rh105"));
+  // Ru106
+  data[ID("Ru106")].PutNdiv(0,0,0,1);
+  data[ID("Ru106")].PutIDnextDecay(ID("Rh106"));
+  // Rh103
+  data[ID("Rh103")].PutNdiv(0,2,0,0);
+  real r_rh3_c[]={0.99600056, 3.99944E-3};
+  string nuc_rh3_c[]={"Pd104","Ru104"};
+  PutData("Rh103",1,r_rh3_c,nuc_rh3_c);
+  // Rh105
+  data[ID("Rh105")].PutNdiv(0,2,0,1);
+  data[ID("Rh105")].PutIDnextDecay(ID("Pd105"));
+  real r_rh5_c[]={0.687, 0.313};
+  int id_rh5_c[]={ID("Rh106"),ID("Pd106")};
+  data[ID("Rh105")].PutData(1,r_rh5_c,id_rh5_c);
+  // Rh106
+  data[ID("Rh106")].PutNdiv(0,0,0,1);
+  data[ID("Rh106")].PutIDnextDecay(ID("Pd106"));
+  // Pd104
+  data[ID("Pd104")].PutNdiv(0,1,0,0);
+  // Pd105
+  data[ID("Pd105")].PutNdiv(0,1,0,0);
+  // Pd106
+  data[ID("Pd106")].PutNdiv(0,1,0,0);
+  // Pd107
+  data[ID("Pd107")].PutNdiv(0,1,0,1);
+  data[ID("Pd107")].PutIDnextDecay(ID("Ag107"));
+  // Pd108
+  data[ID("Pd108")].PutNdiv(0,1,0,0);
+  data[ID("Pd108")].PutIDnextCapture(ID("Ag109"));
+  // Pd110
+  // Ag107
+  // Ag109
+  data[ID("Ag109")].PutNdiv(0,3,0,0);
+  real r_ag9_c[]={0.002844,0.052,0.945156};
+  //real r_ag9_c[]={0.0024288,0.1904,0.807171}; // FAST
+  int id_ag9_c[]={ID("Pd110"),ID("Ag110m"),ID("Cd110")};
+  data[ID("Ag109")].PutData(1,r_ag9_c,id_ag9_c);
+  // Ag110m
+  data[ID("Ag110m")].PutNdiv(0,0,0,2);
+  real r_ag0m_d[]={0.000042, 0.999958};
+  int id_ag0m_d[]={ID("Pd110"),ID("Cd110")};
+  data[ID("Ag110m")].PutData(3,r_ag0m_d,id_ag0m_d);
+  // Cd110
+  data[ID("Cd110")].PutNdiv(0,1,0,0);
+  // Cd111
+  data[ID("Cd111")].PutNdiv(0,1,0,0);
+  // Cd112
+  data[ID("Cd112")].PutNdiv(0,2,0,0);
+  real r_cd2_c[]={0.6628, 0.3372};
+  int id_cd2_c[]={ID("Cd113m"),ID("Cd113")};
+  data[ID("Cd112")].PutData(1,r_cd2_c,id_cd2_c);
+  // Cd113
+  data[ID("Cd113")].PutNdiv(0,1,0,1);
+  data[ID("Cd113")].PutIDnextDecay(ID("In113"));
+  // Cd113m
+  data[ID("Cd113m")].PutNdiv(0,1,0,2);
+  data[ID("Cd113m")].PutIDnextCapture(ID("Cd114"));
+  real r_cd3m_d[]={0.001, 0.999};
+  int id_cd3m_d[]={ID("Cd113"), ID("In113")};
+  data[ID("Cd113m")].PutData(3,r_cd3m_d,id_cd3m_d);
+  // Cd114
+  data[ID("Cd114")].PutNdiv(0,1,0,0);
+  data[ID("Cd114")].PutIDnextCapture(ID("In115"));
+  // Cd116
+  // In113
+  // In115
+  data[ID("In115")].PutNdiv(0,1,0,0);
+  data[ID("In115")].PutIDnextCapture(ID("Sn116"));
+  // Sn116
+  data[ID("Sn116")].PutNdiv(0,1,0,0);
+  // Sn117
+  data[ID("Sn117")].PutNdiv(0,1,0,0);
+  // Sn118
+  data[ID("Sn118")].PutNdiv(0,2,0,0);
+  real r_sn8_c[]={0.045, 0.955};
+  int id_sn8_c[]={ID("Sn119m"), ID("Sn119")};
+  data[ID("Sn118")].PutData(1,r_sn8_c,id_sn8_c);
+  // Sn119
+  data[ID("Sn119")].PutNdiv(0,1,0,0);
+  // Sn119m
+  data[ID("Sn119m")].PutNdiv(0,0,0,1);
+  data[ID("Sn119m")].PutIDnextDecay(ID("Sn119"));
+  // Sn120
+  data[ID("Sn120")].PutNdiv(0,2,0,0);
+  real r_sn0_c[]={0.007, 0.993};
+  int id_sn0_c[]={ID("Sn121m"), ID("Sn121")};
+  data[ID("Sn120")].PutData(1,r_sn0_c,id_sn0_c);
+  // Sn121
+  data[ID("Sn121")].PutNdiv(0,0,0,1);
+  data[ID("Sn121")].PutIDnextDecay(ID("Sb121"));
+  // Sn121m
+  data[ID("Sn121m")].PutNdiv(0,0,0,2);
+  real r_sn1m_d[]={0.776, 0.224};
+  int id_sn1m_d[]={ID("Sn121"), ID("Sb121")};
+  data[ID("Sn121m")].PutData(3,r_sn1m_d,id_sn1m_d);
+  // Sn122
+  data[ID("Sn122")].PutNdiv(0,2,0,0);
+  real r_sn2_c[]={0.005,0.995};
+  int id_sn2_c[]={ID("Sn123"),ID("Sb123")};
+  data[ID("Sn122")].PutData(1,r_sn2_c,id_sn2_c);
+  // Sn123
+  data[ID("Sn123")].PutNdiv(0,1,0,1);
+  data[ID("Sn123")].PutIDnextDecay(ID("Sb123"));
+  // Sn124
+  data[ID("Sn124")].PutNdiv(0,1,0,0);
+  data[ID("Sn124")].PutIDnextCapture(ID("Sb125"));
+  // Sn126
+  data[ID("Sn126")].PutNdiv(0,2,0,1);
+  data[ID("Sn126")].PutIDnextDecay(ID("Sb126m"));
+  real r_sn6_c[]={0.861,0.139};
+  int id_sn6_c[]={ID("I127"),ID("Te127m")};
+  data[ID("Sn126")].PutData(1,r_sn6_c,id_sn6_c);
+  // Sb121
+  data[ID("Sb121")].PutNdiv(0,2,0,0);
+  real r_sb1_c[]={0.024,0.976};
+  int id_sb1_c[]={ID("Sn122"),ID("Te122")};
+  data[ID("Sb121")].PutData(1,r_sb1_c,id_sb1_c);
+  // Sb123
+  data[ID("Sb123")].PutNdiv(0,2,0,0);
+  //real r_sb3_c[]={0.0026,0.9982}; // The sum is not 1
+  real r_sb3_c[]={0.0027,0.9973}; // Re-calculated
+  int id_sb3_c[]={ID("Te124"),ID("Sb124")};
+  data[ID("Sb123")].PutData(1,r_sb3_c,id_sb3_c);
+  // Sb124
+  data[ID("Sb124")].PutNdiv(0,1,0,1);
+  data[ID("Sb124")].PutIDnextDecay(ID("Te124"));
+  // Sb125
+  data[ID("Sb125")].PutNdiv(0,1,0,2);
+  real r_sb5_d[]={0.782,0.218};
+  int id_sb5_d[]={ID("Te125"), ID("Te125m")};
+  data[ID("Sb125")].PutData(3,r_sb5_d,id_sb5_d);
+  // Sb126
+  data[ID("Sb126")].PutNdiv(0,2,0,1); 
+  data[ID("Sb126")].PutIDnextDecay(ID("Te126"));
+  real r_sb6_c[]={0.861,0.139};
+  int id_sb6_c[]={ID("I127"),ID("Te127m")};
+  data[ID("Sb126")].PutData(1,r_sb6_c,id_sb6_c);
+  // Sb126m
+  data[ID("Sb126m")].PutNdiv(0,2,0,2);
+  real r_sb6m_d[]={0.14, 0.86};
+  int id_sb6m_d[]={ID("Sb126"), ID("Te126")};
+  real r_sb6m_c[]={0.861,0.139};
+  int id_sb6m_c[]={ID("I127"),ID("Te127m")};
+  data[ID("Sb126m")].PutData(3,r_sb6m_d,id_sb6m_d);
+  data[ID("Sb126m")].PutData(1,r_sb6m_c,id_sb6m_c);
+  // Te122
+  data[ID("Te122")].PutNdiv(0,2,0,0);
+  real r_te2_c[]={0.676,0.324};
+  int id_te2_c[]={ID("Te123"), ID("Te123m")};
+  data[ID("Te122")].PutData(2,r_te2_c,id_te2_c);
+  // Te123
+  data[ID("Te123")].PutNdiv(0,1,0,1);
+  data[ID("Te123")].PutIDnextDecay(ID("Sb123"));
+  // Te123m
+  data[ID("Te123m")].PutNdiv(0,0,0,1);
+  data[ID("Te123m")].PutIDnextDecay(ID("Te123"));
+  // Te124
+  data[ID("Te124")].PutNdiv(0,2,0,0);
+  real r_te4_c[]={0.994,0.006};
+  int id_te4_c[]={ID("Te125"), ID("Te125m")};
+  data[ID("Te124")].PutData(2,r_te4_c,id_te4_c);
+  // Te125
+  data[ID("Te125")].PutNdiv(0,1,0,0);
+  // Te125m
+  data[ID("Te125m")].PutNdiv(0,0,0,1);
+  data[ID("Te125m")].PutIDnextDecay(ID("Te125"));
+  // Te126
+  data[ID("Te126")].PutNdiv(0,2,0,0);
+  real r_te6_c[]={0.13,0.87};
+  int id_te6_c[]={ID("Te127m"),ID("I127")};
+  data[ID("Te126")].PutData(1,r_te6_c,id_te6_c);
+  // Te127m
+  data[ID("Te127m")].PutNdiv(0,1,0,1);
+  data[ID("Te127m")].PutIDnextCapture(ID("Te128"));
+  data[ID("Te127m")].PutIDnextDecay(ID("I127"));
+  // Te128
+  data[ID("Te128")].PutNdiv(0,2,0,0);
+  real r_te8_c[]={0.071,0.929};
+  int id_te8_c[]={ID("Te129m"),ID("I129")};
+  data[ID("Te128")].PutData(2,r_te8_c,id_te8_c);
+  // Te129m
+  data[ID("Te129m")].PutNdiv(0,1,0,1);
+  data[ID("Te129m")].PutIDnextCapture(ID("Te130"));
+  data[ID("Te129m")].PutIDnextDecay(ID("I129"));
+  // Te130
+  data[ID("Te130")].PutNdiv(0,1,0,0);
+  data[ID("Te130")].PutIDnextCapture(ID("I131"));
+  // Te132
+  data[ID("Te132")].PutNdiv(0,0,0,1);
+  data[ID("Te132")].PutIDnextDecay(ID("Xe132"));
+  // I127
+  data[ID("I127")].PutNdiv(0,2,0,0);
+  real r_i7_c[]={0.939,0.061};
+  string nuc_i7_c[]={"Xe128","Te128"};
+  PutData("I127",1,r_i7_c,nuc_i7_c);
+  // I129
+  data[ID("I129")].PutNdiv(0,2,0,1);
+  real r_i9_c[]={0.88811,0.11189};
+  int id_i9_c[]={ID("I130"),ID("Xe130")};
+  data[ID("I129")].PutData(1,r_i9_c,id_i9_c);
+  data[ID("I129")].PutIDnextDecay(ID("Xe129"));
+  // I130
+  data[ID("I130")].PutNdiv(0,1,0,1);
+  data[ID("I130")].PutIDnextDecay(ID("Xe130"));
+  // I131
+  data[ID("I131")].PutNdiv(0,1,0,1);
+  data[ID("I131")].PutIDnextDecay(ID("Xe131"));
+  data[ID("I131")].PutIDnextCapture(ID("Xe132"));
+  // I135
+  data[ID("I135")].PutNdiv(0,1,0,1);
+  data[ID("I135")].PutIDnextDecay(ID("Xe135"));
+  data[ID("I135")].PutIDnextCapture(ID("Xe136"));
+  // Xe126
+  // Xe128
+  data[ID("Xe128")].PutNdiv(0,1,0,0);
+  // Xe129
+  data[ID("Xe129")].PutNdiv(0,1,0,0);
+  // Xe130
+  data[ID("Xe130")].PutNdiv(0,1,0,0);
+  // Xe131
+  data[ID("Xe131")].PutNdiv(0,1,0,0);
+  // Xe132
+  data[ID("Xe132")].PutNdiv(0,1,0,0);
+  // Xe133
+  data[ID("Xe133")].PutNdiv(0,1,0,1);
+  data[ID("Xe133")].PutIDnextDecay(ID("Cs133"));
+  // Xe134
+  data[ID("Xe134")].PutNdiv(0,2,0,0);
+  real r_xe4_c[]={0.99999952,0.00000048};
+  int id_xe4_c[]={ID("Xe135"),ID("Cs135")};
+  data[ID("Xe134")].PutData(1,r_xe4_c,id_xe4_c);
+  // Xe135
+  data[ID("Xe135")].PutNdiv(0,1,0,1);
+  data[ID("Xe135")].PutIDnextDecay(ID("Cs135"));
+  // Xe136
+  data[ID("Xe136")].PutNdiv(0,1,0,0);
+  data[ID("Xe136")].PutIDnextCapture(ID("Cs137"));
+  // Cs133
+  data[ID("Cs133")].PutNdiv(0,1,0,0);
+  // Cs134
+  data[ID("Cs134")].PutNdiv(0,1,0,1);
+  data[ID("Cs134")].PutIDnextDecay(ID("Ba134"));
+  // Cs135
+  data[ID("Cs135")].PutNdiv(0,1,0,1);
+  data[ID("Cs135")].PutIDnextDecay(ID("Ba135"));
+  // Cs136
+  data[ID("Cs136")].PutNdiv(0,1,0,1);
+  data[ID("Cs136")].PutIDnextDecay(ID("Ba136"));
+  // Cs137
+  data[ID("Cs137")].PutNdiv(0,1,0,2);
+  data[ID("Cs137")].PutIDnextCapture(ID("Ba138"));
+  real r_cs7_d[]={0.053, 0.947};
+  int id_cs7_d[]={ID("Ba137"),ID("Ba137m")};
+  data[ID("Cs137")].PutData(3,r_cs7_d,id_cs7_d);
+  // Ba134
+  data[ID("Ba134")].PutNdiv(0,1,0,0);
+  // Ba135
+  data[ID("Ba135")].PutNdiv(0,1,0,0);
+  // Ba136
+  data[ID("Ba136")].PutNdiv(0,2,0,0);
+  real r_ba6_c[]={0.975, 0.025};
+  int id_ba6_c[]={ID("Ba137"), ID("Ba137m")};
+  data[ID("Ba136")].PutData(1,r_ba6_c,id_ba6_c);
+  // Ba137
+  data[ID("Ba137")].PutNdiv(0,1,0,0);
+  // Ba137m
+  data[ID("Ba137m")].PutNdiv(0,0,0,1);
+  data[ID("Ba137m")].PutIDnextDecay(ID("Ba137"));
+  // Ba138
+  data[ID("Ba138")].PutNdiv(0,1,0,0);
+  data[ID("Ba138")].PutIDnextCapture(ID("La139"));
+  // Ba140
+  data[ID("Ba140")].PutNdiv(0,0,0,1);
+  data[ID("Ba140")].PutIDnextDecay(ID("La140"));
+  // La139
+  data[ID("La139")].PutID(ID("La139"));
+  data[ID("La139")].PutNdiv(0,1,0,0);
+  // La140
+  data[ID("La140")].PutNdiv(0,1,0,1);
+  data[ID("La140")].PutIDnextCapture(ID("Ce141"));
+  data[ID("La140")].PutIDnextDecay(ID("Ce140"));
+  // Ce140
+  data[ID("Ce140")].PutNdiv(0,1,0,0);
+  // Ce141
+  data[ID("Ce141")].PutNdiv(0,1,0,1);
+  data[ID("Ce141")].PutIDnextDecay(ID("Pr141"));
+  // Ce142
+  data[ID("Ce142")].PutNdiv(0,1,0,0);
+  // Ce143
+  data[ID("Ce143")].PutNdiv(0,1,0,1);
+  data[ID("Ce143")].PutIDnextDecay(ID("Pr143"));
+  // Ce144
+  data[ID("Ce144")].PutNdiv(0,1,0,1);
+  data[ID("Ce144")].PutIDnextCapture(ID("Nd145"));
+  data[ID("Ce144")].PutIDnextDecay(ID("Pr144"));
+  // Pr141
+  data[ID("Pr141")].PutNdiv(0,2,0,0);
+  real r_pr1_c[]={0.999836,0.000164};
+  string nuc_pr1_c[]={"Nd142","Ce142"};
+  PutData("Pr141",1,r_pr1_c,nuc_pr1_c);
+  // Pr143
+  data[ID("Pr143")].PutNdiv(0,1,0,1);
+  data[ID("Pr143")].PutIDnextCapture(ID("Nd144"));
+  data[ID("Pr143")].PutIDnextDecay(ID("Nd143"));
+  // Pr144
+  data[ID("Pr144")].PutNdiv(0,0,0,1);
+  data[ID("Pr144")].PutIDnextDecay(ID("Nd144"));
+  // Nd142
+  data[ID("Nd142")].PutNdiv(0,1,0,0);
+  // Nd143
+  data[ID("Nd143")].PutNdiv(0,1,0,0);
+  // Nd144
+  data[ID("Nd144")].PutNdiv(0,1,0,0);
+  // Nd145
+  data[ID("Nd145")].PutNdiv(0,1,0,0);
+  // Nd146
+  data[ID("Nd146")].PutNdiv(0,1,0,0);
+  // Nd147
+  data[ID("Nd147")].PutNdiv(0,1,0,1);
+  data[ID("Nd147")].PutIDnextDecay(ID("Pm147"));
+  // Nd148
+  data[ID("Nd148")].PutNdiv(0,1,0,0);
+  data[ID("Nd148")].PutIDnextCapture(ID("Pm149"));
+  // Nd150
+  data[ID("Nd150")].PutNdiv(0,1,0,0);
+  data[ID("Nd150")].PutIDnextCapture(ID("Pm151"));
+  // Pm147
+  data[ID("Pm147")].PutNdiv(0,2,0,1);
+  real r_pm7_c[]={0.53,0.47};
+  int id_pm7_c[]={ID("Pm148"),ID("Pm148m")};
+  data[ID("Pm147")].PutData(1,r_pm7_c,id_pm7_c);
+  data[ID("Pm147")].PutIDnextDecay(ID("Sm147"));
+  // Pm148
+  data[ID("Pm148")].PutNdiv(0,1,0,1);
+  data[ID("Pm148")].PutIDnextDecay(ID("Sm148"));
+  // Pm148m
+  data[ID("Pm148m")].PutNdiv(0,1,0,2);
+  data[ID("Pm148m")].PutIDnextCapture(ID("Pm149"));
+  real r_pm8m_d[]={0.046, 0.954};
+  string nuc_pm8m_d[]={"Pm148","Sm148"};
+  PutData("Pm148m",3,r_pm8m_d,nuc_pm8m_d);
+  // Pm149
+  data[ID("Pm149")].PutNdiv(0,1,0,1);
+  data[ID("Pm149")].PutIDnextCapture(ID("Sm150"));
+  data[ID("Pm149")].PutIDnextDecay(ID("Sm149"));
+  // Pm151
+  data[ID("Pm151")].PutNdiv(0,1,0,1);
+  data[ID("Pm151")].PutIDnextCapture(ID("Sm152"));
+  data[ID("Pm151")].PutIDnextDecay(ID("Sm151"));
+  // Sm147
+  data[ID("Sm147")].PutNdiv(0,1,0,0);
+  // Sm148
+  data[ID("Sm148")].PutNdiv(0,1,0,0);
+  // Sm149
+  data[ID("Sm149")].PutNdiv(0,1,0,0);
+  // Sm150
+  data[ID("Sm150")].PutNdiv(0,1,0,0);
+  // Sm151
+  data[ID("Sm151")].PutNdiv(0,1,0,1);
+  data[ID("Sm151")].PutIDnextDecay(ID("Eu151"));
+  // Sm152
+  data[ID("Sm152")].PutNdiv(0,1,0,0);
+  //data[ID("Sm152")].PutIDnextCapture(ID("Eu153")); // ??????
+  // Sm153
+  data[ID("Sm153")].PutNdiv(0,1,0,1);
+  data[ID("Sm153")].PutIDnextDecay(ID("Eu153"));
+  // Sm154
+  data[ID("Sm154")].PutNdiv(0,1,0,0);
+  data[ID("Sm154")].PutIDnextCapture(ID("Eu155"));
+  // Eu151
+  data[ID("Eu151")].PutNdiv(0,3,0,0);
+  //real r_eu1_c[]={0.645, 0.2698}; // The sum is not 1
+  // (SRAC-ChainJ33, Eu-151=>Sm-152 is neglected)
+  real r_eu1_c[]={0.644, 0.27056, 0.08544};
+  string id_eu1_c[]={"Eu152","Gd152","Sm152"};
+  PutData("Eu151",1,r_eu1_c,id_eu1_c);
+  // Eu152 
+  // (SRAC-ChainJ33, Eu-152=>Sm-152 is neglected)
+  PutNdiv("Eu152",0,1,0,2);
+  real r_eu2_d[]={0.27,0.73}; 
+  string id_eu2_d[]={"Gd152","Sm152"};
+  PutData("Eu152",3,r_eu2_d,id_eu2_d);
+  // Eu153
+  data[ID("Eu153")].PutNdiv(0,1,0,0);
+  // Eu154
+  //  In SRAC, path to Sm-154 is neglected.
+  data[ID("Eu154")].PutNdiv(0,1,0,2);
+  real r_eu4_d[]={0.9998, 0.0002};
+  string id_eu4_d[]={"Gd154","Sm154"};
+  PutData("Eu154",3,r_eu4_d,id_eu4_d);
+  // Eu155
+  data[ID("Eu155")].PutNdiv(0,1,0,1);
+  data[ID("Eu155")].PutIDnextDecay(ID("Gd155"));
+  // Eu156
+  data[ID("Eu156")].PutNdiv(0,1,0,1);
+  data[ID("Eu156")].PutIDnextDecay(ID("Gd156"));
+  // Eu157
+  data[ID("Eu157")].PutNdiv(0,1,0,1);
+  data[ID("Eu157")].PutIDnextDecay(ID("Gd157"));
+  data[ID("Eu157")].PutIDnextCapture(ID("Gd158"));
+  // Gd152
+  // Gd154
+  data[ID("Gd154")].PutNdiv(0,1,0,0);
+  // Gd155
+  data[ID("Gd155")].PutNdiv(0,1,0,0);
+  // Gd156
+  data[ID("Gd156")].PutNdiv(0,1,0,0);
+  // Gd157
+  data[ID("Gd157")].PutNdiv(0,1,0,0);
+  // Gd158
+  data[ID("Gd158")].PutNdiv(0,1,0,0);
+  data[ID("Gd158")].PutIDnextCapture(ID("Tb159"));
+  // Gd160
+  // Tb159
+  data[ID("Tb159")].PutNdiv(0,1,0,0);
+  // Tb160
+  data[ID("Tb160")].PutNdiv(0,1,0,1);
+  data[ID("Tb160")].PutIDnextCapture(ID("Dy161"));
+  data[ID("Tb160")].PutIDnextDecay(ID("Dy160"));
+  // Dy160
+  data[ID("Dy160")].PutNdiv(0,1,0,0);
+  // Dy161
+  data[ID("Dy161")].PutNdiv(0,1,0,0); 
+  // Dy162
+  data[ID("Dy162")].PutNdiv(0,1,0,0);
+  // Dy163
+  data[ID("Dy163")].PutNdiv(0,1,0,0);
+  // Dy164
+  data[ID("Dy164")].PutNdiv(0,1,0,0);
+  data[ID("Dy164")].PutIDnextCapture(ID("Ho165"));
+  // Ho163
+  data[ID("Ho163")].PutNdiv(0,0,0,1);
+  data[ID("Ho163")].PutIDnextDecay(ID("Dy163"));
+  // Ho165
+  data[ID("Ho165")].PutNdiv(0,2,0,0);
+  real r_ho5_c[]={0.9555, 0.0445};
+  int id_ho5_c[]={ID("Er166"), ID("Ho166m")};
+  data[ID("Ho165")].PutData(1,r_ho5_c,id_ho5_c);
+  // Er162
+  data[ID("Er162")].PutNdiv(0,1,0,0);
+  data[ID("Er162")].PutIDnextCapture(ID("Ho163"));
+  // Er164
+  data[ID("Er164")].PutNdiv(0,1,0,0);
+  data[ID("Er164")].PutIDnextCapture(ID("Ho165"));
+  // Er166
+  data[ID("Er166")].PutNdiv(0,1,0,0);
+  // Er167
+  data[ID("Er167")].PutNdiv(0,1,0,0);
+  // Er168
+  // Er170
+  // +++ Burnable poison
+  // Hf176
+  data[ID("Hf176")].PutNdiv(0,1,0,0);
+  // Hf177
+  data[ID("Hf177")].PutNdiv(0,1,0,0);
+  // Hf178
+  data[ID("Hf178")].PutNdiv(0,1,0,0);
+  // Hf179
+  data[ID("Hf179")].PutNdiv(0,1,0,0);
+  // Hf180
+};
+
+void BurnupChain::OverWritingChainData(string mdir,string filename)
+{
+  mdir.append(filename);
+  ifstream fin;
+  fin.open(mdir.data(),ios::in);
+  if(fin.fail()){
+    cout<<"Failed to open the file.\n";
+    cout<<"File name is "<<mdir<<"\n";
+    exit(0);
+  };
+
+  vector<int> div(4);
+  int fl=0;
+  while(fl!=-1){
+    int matno;
+    fin>>matno;
+    if(matno==-1)break;
+    real halflife;
+    fin>>halflife;
+    if(halflife>1e-10)decay_const[matno]=0.693/halflife;
+    real elp,eem,ehp;
+    fin>>elp;
+    fin>>eem;
+    fin>>ehp;
+    data[matno].PutDecayEnergy(0,elp);
+    data[matno].PutDecayEnergy(1,eem);
+    data[matno].PutDecayEnergy(2,ehp);
+    for(int i=0;i<4;i++){
+      fin>>div[i];
+    };
+    data[matno].PutNdiv(div[0],div[1],div[2],div[3]);
+    //cout<<matno<<" "<<div[0]<<" "<<div[1]<<" "<<div[2]<<" "<<div[3]<<"\n";
+    for(int i=0;i<4;i++){
+      if(div[i]>0){
+        real *tmp1=new real[div[i]];
+        int *tmp2=new int[div[i]];
+        tmp1[0]=1.;
+        for(int j=0;j<div[i];j++){
+	  fin>>tmp2[j];
+  	  if(div[i]!=1){
+   	    fin>>tmp1[j];
+  	  };
+        };
+        data[matno].PutData(i,tmp1,tmp2);
+        delete [] tmp1;
+        delete [] tmp2;
+      };
+    };
+  };
+  fin.close();
+};
+
+void BurnupChain::ReadFPYieldDataFromFile(string mdir,string fname)
+{
+  ifstream fin;
+
+  mdir.append(fname);
+  fin.open(mdir.data(),ios::in);
+  if(fin.fail()){
+    cout<<"# Failed to open the file.\n";
+    cout<<"# File name is "<<mdir<<"\n";
+    exit(0);
+  };
+
+  bool ed=false;
+
+  while(!ed){
+
+  int fisnuc;
+  fin>>fisnuc;
+
+  if(fisnuc==-1){
+    ed=true;
+  }else{
+
+  vector<int> fisid(fisnuc);
+  for(int i=0;i<fisnuc;i++){
+    fin>>fisid[i];
+  };
+
+  int fpnuc;
+  fin>>fpnuc;
+  for(int i=0;i<fisnuc;i++){
+    data[fisid[i]].PutNdivFission(fpnuc);
+  };
+
+  for(int i=0;i<fpnuc;i++){
+    int fpid;
+    real fpy;
+    fin>>fpid;
+    fin>>fpy;
+    for(int ii=0;ii<fisnuc;ii++){
+      data[fisid[ii]].PutIDnextFission(i,fpid,fpy);
+    };
+  };
+
+  };
+
+  };
+
+  fin.close();
+
+};
+
+// +++ Decay constant manupulation
+
+void BurnupChain::WriteDecayConstant()
+{
+  cout.setf(ios::showpoint);
+  cout.precision(6);
+  for(int i=0;i<10000;i++){
+    if(decay_const[i]!=0.){
+      cout<<"  "<<i<<"\n";
+      cout<<"  "<<decay_const[i]<<"\n";
+    };
+  };
+  cout<<"-1\n";
+};
+
+void BurnupChain::ReadDecayConstantFromFile(string mdir,string fname)
+{
+  mdir.append(fname);
+  ifstream fin;
+  fin.open(mdir.data(),ios::in);
+  if(fin.fail()){
+    cout<<"Failed to open the file.\n";
+    cout<<"File name is "<<mdir<<"\n";
+    exit(0);
+  };
+
+  read_decay_constant=true;
+
+  int nuc;
+  real par;
+
+  bool ed=false;
+  while(!ed){
+    fin>>nuc;
+    if(nuc==-1){
+      ed=true;
+    }else{
+      fin>>par;
+      decay_const[nuc]=par;
+    };    
+  };
+
+  fin.close();
+};
+
+void BurnupChain::ShowHalfLife()
+{
+  real ln2=0.69314718;
+
+  cout<<"#\n# List of decay constant & half-life\n#\n";
+  for(int i=0;i<10000;i++){
+    if(decay_const[i]!=0.){
+      string name=Name(i);
+      real dc=decay_const[i];
+      real hl=ln2/dc;
+      cout<<"# "<<i<<" "<<name<<" : "<<dc<<" / ";
+      if(hl<60.){
+	cout<<hl<<" Sec.\n";
+      }else if(hl<60*60){
+	cout<<hl/60.<<" Min.\n";
+      }else if(hl<60*60*24){
+	cout<<hl/(60*60)<<" Hours\n";
+      }else if(hl<60*60*24*365){
+	cout<<hl/(60*60*24)<<" Days\n";
+      }else{
+	cout<<hl/(60*60*24*365)<<" Years\n";
+      };
+    };
+  };
+};
+
+void BurnupChain::ShowChainData()
+{
+  for(int i=0;i<10000;i++){
+    if(data[i].GetID()!=-1){
+      ShowChainData(i);
+      cout<<"#\n";
+    };
+  };
+};
+
+void BurnupChain::ShowChainData(string name)
+{
+  int id=ID(name);
+  cout<<"# Chain data for "<<name<<" ("<<id<<")\n";
+  int ncap=GetNdivCapture(id);
+  int nn2n=GetNdivN2N(id);
+  int ndec=GetNdivDecay(id);
+  if(ncap!=0){
+    cout<<"#   (Capture)\n";
+    for(int i=0;i<ncap;i++){
+      int idn=GetNextIDCapture(id,i);
+      string name2=Name(idn);
+      real frac=GetRatioCapture(id,i);
+      cout<<"#       "<<name2<<" ("<<idn<<") : "<<frac<<"\n";
+    };
+  };
+  if(nn2n!=0){
+    cout<<"#   (n,2n)\n";
+    for(int i=0;i<nn2n;i++){
+      int idn=GetNextIDN2N(id,i);
+      string name2=Name(idn);
+      real frac=GetRatioN2N(id,i);
+      cout<<"#       "<<name2<<" ("<<idn<<") : "<<frac<<"\n";
+    };
+  };
+  if(ndec!=0){
+    cout<<"#   (Decay)\n";
+    for(int i=0;i<ndec;i++){
+      int idn=GetNextIDDecay(id,i);
+      string name2=Name(idn);
+      real frac=GetRatioDecay(id,i);
+      cout<<"#       "<<name2<<" ("<<idn<<") : "<<frac<<"\n";
+    };
+  };
+};
+
+void BurnupChain::ShowChainDataToOrigin(string name)
+{
+  int id=ID(name);
+  cout<<"# Origin of "<<name<<" ("<<id<<")\n";
+  for(int i=0;i<10000;i++){
+    if(data[i].GetID()!=-1){
+      int ncap=GetNdivCapture(i);
+      int nn2n=GetNdivN2N(i);
+      int ndec=GetNdivDecay(i);
+      if(ncap!=0){
+	for(int j=0;j<ncap;j++){
+	  int id2=GetNextIDCapture(i,j);
+	  if(id==id2){
+	    cout<<"#   "<<Name(i)<<" ("<<i<<") : ";
+	    cout<<"Capture   ";
+	    cout<<GetRatioCapture(i,j)<<"\n";
+	  };
+	};
+      };
+      if(nn2n!=0){
+	for(int j=0;j<nn2n;j++){
+	  int id2=GetNextIDN2N(i,j);
+	  if(id==id2){
+	    cout<<"#   "<<Name(i)<<" ("<<i<<") : ";
+	    cout<<"(n,2n)    ";
+	    cout<<GetRatioN2N(i,j)<<"\n";
+	  };
+	};
+      };
+      if(ndec!=0){
+	for(int j=0;j<ndec;j++){
+	  int id2=GetNextIDDecay(i,j);
+	  if(id==id2){
+	    cout<<"#   "<<Name(i)<<" ("<<i<<") : ";
+	    cout<<"Decay     ";
+	    cout<<GetRatioDecay(i,j)<<"\n";
+	  };
+	};
+      };
+    };
+  };
+};
+
+void BurnupChain::ShowFPYieldForFP(string name)
+{
+  cout<<"# Fission yield : "<<name<<"\n";
+  cout.setf(ios::scientific);
+  cout.precision(5);
+  int idt=ID(name);
+  for(int i=9000;i<10000;i++){
+    int nd=data[i].GetNdiv(0);
+    if(nd!=0){
+      for(int j=0;j<nd;j++){
+	int id=data[i].GetIDnext(0,j);
+	if(id==idt){
+	  cout<<"# "<<Name(i)<<" : "<<data[i].GetRatio(0,j)<<"\n";
+	};
+      };
+    };
+  };
+};
+
+void BurnupChain::SetOKUMURAChain()
+{
+  // SRAC : fp104bp12 chain (Lumped FP is neglected here)
+  //
+  // The following nuclides are ignored:
+  //   Nb93m -> Mo95 
+  //   Rh106 -> Pd108
+  //   Sb126m -> Sb126
+  //   Ba137m -> Ba137
+  //   Pr144 -> Nd144
+
+  enum name
+    {
+   U234,U235,U236,U237,U238,Np237,Np239,Pu238,Pu239,Pu240,
+   Pu241,Pu242,Am241,Am242,Am242m,Am243,Cm242,Cm243,Cm244,Cm245,
+   Cm246,
+   Kr83,Kr85,Sr90,Y90,Zr93, Zr95,Zr96,Nb95,Mo95,Mo97,
+   Mo98,Mo99,Mo100,Tc99,Ru100, Ru101,Ru102,Ru103,Ru104,Ru105,
+   Ru106,Rh103,Rh105,Ag109,Pd104, Pd105,Pd106,Pd107,Pd108,Cd110,
+   Cd111,Cd112,Cd113,Cd114,Cd116, Ag107,In115,Sn126,Sb125,Sb126,
+   Te127m,I127,I129,I131,I135, Xe131,Xe132,Xe133,Xe134,Xe135,
+   Xe136,La139,La140,Cs133,Cs134, Cs135,Cs137,Ce140,Ce141,Ce144,
+   Ba137,Ba138,Ba140,Pr141,Pr143, Nd142,Nd143,Nd144,Nd145,Nd146,
+   Nd147,Nd148,Nd150,Pm147,Pm148, Pm149,Pm151,Sm147,Sm148,Sm149,
+   Sm150,Sm151,Sm152,Eu151,Eu152, Eu153,Eu154,Eu155,Eu156,Eu157,
+   Gd152,Gd154,Gd155,Gd156,Gd157, Gd158,Gd160,Pm148m,
+   B10,Er162,Er164,Er166,Er167, Er168,Er170,Hf176,Hf177,Hf178,
+   Hf179,Hf180,
+   Nb93m,Rh106,Sb126m,Ba137m,Pr144
+    };
+
+  int no[]=
+    {
+      9225,9228,9231,9234,9237,9346,9352,9434,9437,9440,
+      9443,9446,9543,9546,9547,9549,9631,9634,9637,9640,
+      9643,
+      3640,3646,3843,3928,4034, 4040,4043,4131,4234,4240,
+      4243,4246,4249,4331,4437, 4440,4443,4446,4449,4452,
+      4455,4525,4531,4731,4631, 4634,4637,4640,4643,4837,
+      4840,4843,4846,4849,4855, 4725,4931,5067,5137,5140,
+      5247,5325,5331,5337,5349, 5446,5449,5452,5455,5458,
+      5461,5728,5731,5525,5528, 5531,5537,5837,5840,5849,
+      5646,5649,5655,5925,5931, 6025,6028,6031,6034,6037,
+      6040,6043,6049,6149,6152, 6155,6161,6234,6237,6240,
+      6243,6246,6249,6325,6328, 6331,6334,6337,6340,6343,
+      6425,6431,6434,6437,6440, 6443,6449,6153,
+      525,6825,6831,6837,6840, 6843,6849,7231,7234,7237,
+      7240,7243,
+      //4126,4534,5141,5647,5934,
+      -1,-2,-3,-4,-5
+    };
+
+  int hm_num=5+2+5+4+5;
+  //int fp_num=103;
+  int fp_num=98;
+
+  for(int i=0;i<hm_num;i++){
+    data[no[i]].PutID(no[i]);
+  };
+  for(int i=0;i<fp_num;i++){
+    data[no[hm_num+i]].PutID(no[hm_num+i]);
+  };
+
+  // u-234
+  data[9225].PutID(9225);
+  data[9225].PutNdiv(fp_num,1,0,0);
+  // u-235
+  data[9228].PutID(9228);
+  data[9228].PutNdiv(fp_num,1,1,0); // f,c,2n,d
+  // u-236
+  data[9231].PutID(9231);
+  data[9231].PutNdiv(fp_num,1,1,0);
+  // u-237
+  data[9234].PutID(9234);
+  data[9234].PutNdiv(fp_num,1,1,1);
+  data[9234].PutIDnextDecay(9346); // beta-
+  // u-238
+  data[9237].PutID(9237);
+  data[9237].PutNdiv(fp_num,1,1,0);
+  data[9237].PutIDnextCapture(9352);
+  // np-237
+  data[9346].PutID(9346);
+  data[9346].PutNdiv(fp_num,1,1,0);
+  data[9346].PutIDnextCapture(9434);
+  data[9346].PutIDnextN2N(9234);
+  // np-239
+  data[9352].PutID(9352);
+  data[9352].PutNdiv(fp_num,1,0,1);
+  data[9352].PutIDnextCapture(9440);
+  data[9352].PutIDnextDecay(9437);
+  // pu-238
+  data[9434].PutID(9434);
+  data[9434].PutNdiv(fp_num,1,0,1);
+  data[9434].PutIDnextDecay(9225);
+  // pu-239
+  data[9437].PutID(9437);
+  data[9437].PutNdiv(fp_num,1,1,1);
+  data[9437].PutIDnextDecay(9228);
+  // pu-240
+  data[9440].PutID(9440);
+  data[9440].PutNdiv(fp_num,1,1,1);
+  data[9440].PutIDnextDecay(9231);
+  // pu-241
+  data[9443].PutID(9443);
+  data[9443].PutNdiv(fp_num,1,1,2);
+  real r_p1_d[]={0.999975, 0.000025};
+  int id_p1_d[]={9543,9234};
+  data[9443].PutData(3,r_p1_d,id_p1_d);
+  // pu-242
+  data[9446].PutID(9446);
+  data[9446].PutNdiv(fp_num,1,1,1);
+  data[9446].PutIDnextCapture(9549);
+  data[9446].PutIDnextDecay(9237);
+  // am-241
+  data[9543].PutID(9543);
+  data[9543].PutNdiv(fp_num,2,0,1);
+  real r_a1_c[]={0.1164,0.8836};
+  int id_a1_c[]={9547, 9546};
+  data[9543].PutData(1,r_a1_c,id_a1_c);
+  data[9543].PutIDnextDecay(9346);
+  // am-242
+  data[9546].PutID(9546);
+  data[9546].PutNdiv(fp_num,1,0,2);
+  real r_a2_d[]={0.173, 0.827};
+  int id_a2_d[]={9446,9631};
+  data[9546].PutData(3,r_a2_d,id_a2_d);
+  // am-242m
+  data[9547].PutID(9547);
+  data[9547].PutNdiv(fp_num,1,1,1);
+  data[9547].PutIDnextDecay(9546);
+  data[9547].PutIDnextCapture(9549);
+  data[9547].PutIDnextN2N(9543);
+  // am-243
+  data[9549].PutID(9549);
+  data[9549].PutNdiv(fp_num,1,1,1);
+  data[9549].PutIDnextDecay(9352);
+  data[9549].PutIDnextCapture(9637);
+  // cm-242
+  data[9631].PutID(9631);
+  data[9631].PutNdiv(fp_num,1,0,1);
+  data[9631].PutIDnextDecay(no[Pu238]);
+  // cm-243
+  data[9634].PutID(9634);
+  data[9634].PutNdiv(fp_num,1,1,1);
+  data[9634].PutIDnextDecay(no[Pu239]);
+  // cm-244
+  data[9637].PutID(9637);
+  data[9637].PutNdiv(fp_num,1,1,1);
+  data[9637].PutIDnextDecay(no[Pu240]);
+  // cm-245
+  data[9640].PutID(9640);
+  data[9640].PutNdiv(fp_num,1,1,1);
+  data[9640].PutIDnextDecay(no[Pu241]);
+  // cm-246
+  data[9643].PutID(9643);
+  data[9643].PutNdiv(fp_num,0,1,1);
+  data[9643].PutIDnextDecay(no[Pu242]);
+  // +++ FP
+  // Sr90
+  data[no[Sr90]].PutID(no[Sr90]);
+  data[no[Sr90]].PutNdiv(0,0,0,1);
+  data[no[Sr90]].PutIDnextDecay(no[Y90]);
+  // Zr93
+  data[no[Zr93]].PutID(no[Zr93]);
+  data[no[Zr93]].PutNdiv(0,0,0,1);
+  data[no[Zr93]].PutIDnextDecay(no[Mo95]);
+  // Zr95
+  data[no[Zr95]].PutID(no[Zr95]);
+  data[no[Zr95]].PutNdiv(0,1,0,2);
+  real r_zr5_d[]={0.999775,0.000225};
+  int id_zr5_d[]={1,1};
+  id_zr5_d[0]=no[Nb95];
+  id_zr5_d[1]=no[Mo95];
+  data[no[Zr95]].PutData(3,r_zr5_d,id_zr5_d);
+  // Nb95
+  data[no[Nb95]].PutID(no[Nb95]);
+  data[no[Nb95]].PutNdiv(0,0,0,1);
+  data[no[Nb95]].PutIDnextDecay(no[Mo95]);
+  // Mo97
+  data[no[Mo97]].PutID(no[Mo97]);
+  data[no[Mo97]].PutNdiv(0,1,0,0);
+  // Mo98
+  data[no[Mo98]].PutID(no[Mo98]);
+  data[no[Mo98]].PutNdiv(0,1,0,0);
+  // Mo99
+  data[no[Mo99]].PutID(no[Mo99]);
+  data[no[Mo99]].PutNdiv(0,1,0,1);
+  data[no[Mo99]].PutIDnextDecay(no[Tc99]);
+  // Tc99
+  data[no[Tc99]].PutID(no[Tc99]);
+  data[no[Tc99]].PutNdiv(0,1,0,0);
+  data[no[Tc99]].PutIDnextCapture(no[Ru100]);
+  // Ru100
+  data[no[Ru100]].PutID(no[Ru100]);
+  data[no[Ru100]].PutNdiv(0,1,0,0);
+  // Ru101
+  data[no[Ru101]].PutID(no[Ru101]);
+  data[no[Ru101]].PutNdiv(0,1,0,0);
+  // Ru102
+  data[no[Ru102]].PutID(no[Ru102]);
+  data[no[Ru102]].PutNdiv(0,1,0,0);
+  // Ru103
+  data[no[Ru103]].PutID(no[Ru103]);
+  data[no[Ru103]].PutNdiv(0,1,0,1);
+  data[no[Ru103]].PutIDnextDecay(no[Rh103]);
+  // Ru104
+  data[no[Ru104]].PutID(no[Ru104]);
+  data[no[Ru104]].PutNdiv(0,1,0,0);
+  // Ru105
+  data[no[Ru105]].PutID(no[Ru105]);
+  data[no[Ru105]].PutNdiv(0,1,0,1);
+  data[no[Ru105]].PutIDnextDecay(no[Rh105]);
+  // Ru106
+  data[no[Ru106]].PutID(no[Ru106]);
+  data[no[Ru106]].PutNdiv(0,0,0,1);
+  data[no[Ru106]].PutIDnextDecay(no[Pd106]);
+  // Rh103
+  data[no[Rh103]].PutID(no[Rh103]);
+  data[no[Rh103]].PutNdiv(0,1,0,0);
+  data[no[Rh103]].PutIDnextCapture(no[Pd104]);
+  // Rh105
+  data[no[Rh105]].PutID(no[Rh105]);
+  data[no[Rh105]].PutNdiv(0,1,0,1);
+  data[no[Rh105]].PutIDnextCapture(no[Pd106]);
+  data[no[Rh105]].PutIDnextDecay(no[Pd105]);
+  // Pd104
+  data[no[Pd104]].PutID(no[Pd104]);
+  data[no[Pd104]].PutNdiv(0,1,0,0);
+  // Pd105
+  data[no[Pd105]].PutID(no[Pd105]);
+  data[no[Pd105]].PutNdiv(0,1,0,0);
+  // Pd106
+  data[no[Pd106]].PutID(no[Pd106]);
+  data[no[Pd106]].PutNdiv(0,1,0,0);
+  // Pd107
+  data[no[Pd107]].PutID(no[Pd107]);
+  data[no[Pd107]].PutNdiv(0,1,0,1);
+  data[no[Pd107]].PutIDnextDecay(no[Ag107]);
+  // Pd108
+  data[no[Pd108]].PutID(no[Pd108]);
+  data[no[Pd108]].PutNdiv(0,1,0,0);
+  data[no[Pd108]].PutIDnextCapture(no[Ag109]);
+  // Ag109
+  data[no[Ag109]].PutID(no[Ag109]);
+  data[no[Ag109]].PutNdiv(0,1,0,0);
+  data[no[Ag109]].PutIDnextCapture(no[Cd110]);
+  // Cd110
+  data[no[Cd110]].PutID(no[Cd110]);
+  data[no[Cd110]].PutNdiv(0,1,0,0);
+  // Cd111
+  data[no[Cd111]].PutID(no[Cd111]);
+  data[no[Cd111]].PutNdiv(0,1,0,0);
+  // Cd112
+  data[no[Cd112]].PutID(no[Cd112]);
+  data[no[Cd112]].PutNdiv(0,1,0,0);
+  // Cd113
+  data[no[Cd113]].PutID(no[Cd113]);
+  data[no[Cd113]].PutNdiv(0,1,0,0);
+  // Cd114
+  data[no[Cd114]].PutID(no[Cd114]);
+  data[no[Cd114]].PutNdiv(0,1,0,0);
+  data[no[Cd114]].PutIDnextCapture(no[In115]);
+  // Sn126
+  data[no[Sn126]].PutID(no[Sn126]);
+  data[no[Sn126]].PutNdiv(0,0,0,1);
+  data[no[Sn126]].PutIDnextDecay(no[Sb126]);
+  // Sb125
+  data[no[Sb125]].PutID(no[Sb125]);
+  data[no[Sb125]].PutNdiv(0,1,0,0);
+  // Te127m
+  data[no[Te127m]].PutID(no[Te127m]);
+  data[no[Te127m]].PutNdiv(0,0,0,1);
+  data[no[Te127m]].PutIDnextDecay(no[I127]);
+  // I131
+  data[no[I131]].PutID(no[I131]);
+  data[no[I131]].PutNdiv(0,0,0,1);
+  data[no[I131]].PutIDnextDecay(no[Xe131]);
+  // I135
+  data[no[I135]].PutID(no[I135]);
+  data[no[I135]].PutNdiv(0,0,0,1);
+  data[no[I135]].PutIDnextDecay(no[Xe135]);
+  // Xe131
+  data[no[Xe131]].PutID(no[Xe131]);
+  data[no[Xe131]].PutNdiv(0,1,0,0);
+  // Xe132
+  data[no[Xe132]].PutID(no[Xe132]);
+  data[no[Xe132]].PutNdiv(0,1,0,0);
+  // Xe133
+  data[no[Xe133]].PutID(no[Xe133]);
+  data[no[Xe133]].PutNdiv(0,1,0,1);
+  data[no[Xe133]].PutIDnextDecay(no[Cs133]);
+  // Xe134
+  data[no[Xe134]].PutID(no[Xe134]);
+  data[no[Xe134]].PutNdiv(0,1,0,0);
+  // Xe135
+  data[no[Xe135]].PutID(no[Xe135]);
+  data[no[Xe135]].PutNdiv(0,1,0,1);
+  data[no[Xe135]].PutIDnextDecay(no[Cs135]);
+  // Xe136
+  data[no[Xe136]].PutID(no[Xe136]);
+  data[no[Xe136]].PutNdiv(0,1,0,0);
+  data[no[Xe136]].PutIDnextCapture(no[Cs137]);
+  // Cs133
+  data[no[Cs133]].PutID(no[Cs133]);
+  data[no[Cs133]].PutNdiv(0,1,0,0);
+  // Cs134
+  data[no[Cs134]].PutID(no[Cs134]);
+  data[no[Cs134]].PutNdiv(0,1,0,0);
+  // Cs135
+  data[no[Cs135]].PutID(no[Cs135]);
+  data[no[Cs135]].PutNdiv(0,0,0,1);
+  data[no[Cs135]].PutIDnextDecay(no[Ba137]);
+  // Cs137
+  data[no[Cs137]].PutID(no[Cs137]);
+  data[no[Cs137]].PutNdiv(0,1,0,1);
+  data[no[Cs137]].PutIDnextCapture(no[Ba138]);
+  data[no[Cs137]].PutIDnextDecay(no[Ba137]);
+  // Ba137
+  data[no[Ba137]].PutID(no[Ba137]);
+  data[no[Ba137]].PutNdiv(0,1,0,0);
+  // Ba138
+  data[no[Ba138]].PutID(no[Ba138]);
+  data[no[Ba138]].PutNdiv(0,1,0,0);
+  data[no[Ba138]].PutIDnextCapture(no[La139]);
+  // Ba140
+  data[no[Ba140]].PutID(no[Ba140]);
+  data[no[Ba140]].PutNdiv(0,0,0,1);
+  data[no[Ba140]].PutIDnextDecay(no[La140]);
+  // La139
+  data[no[La139]].PutID(no[La139]);
+  data[no[La139]].PutNdiv(0,1,0,0);
+  // La140
+  data[no[La140]].PutID(no[La140]);
+  data[no[La140]].PutNdiv(0,0,0,1);
+  data[no[La140]].PutIDnextDecay(no[Ce140]);
+  // Ce140
+  data[no[Ce140]].PutID(no[Ce140]);
+  data[no[Ce140]].PutNdiv(0,1,0,0);
+  // Ce141
+  data[no[Ce141]].PutID(no[Ce141]);
+  data[no[Ce141]].PutNdiv(0,0,0,1);
+  data[no[Ce141]].PutIDnextDecay(no[Pr141]);
+  // Ce144
+  data[no[Ce144]].PutID(no[Ce144]);
+  data[no[Ce144]].PutNdiv(0,1,0,1);
+  data[no[Ce144]].PutIDnextCapture(no[Nd145]);
+  data[no[Ce144]].PutIDnextDecay(no[Nd144]);
+  // Pr141
+  data[no[Pr141]].PutID(no[Pr141]);
+  data[no[Pr141]].PutNdiv(0,1,0,0);
+  data[no[Pr141]].PutIDnextCapture(no[Nd142]);
+  // Pr143
+  data[no[Pr143]].PutID(no[Pr143]);
+  data[no[Pr143]].PutNdiv(0,1,0,1);
+  data[no[Pr143]].PutIDnextCapture(no[Nd144]);
+  data[no[Pr143]].PutIDnextDecay(no[Nd143]);
+  // Nd142
+  data[no[Nd142]].PutID(no[Nd142]);
+  data[no[Nd142]].PutNdiv(0,1,0,0);
+  // Nd143
+  data[no[Nd143]].PutID(no[Nd143]);
+  data[no[Nd143]].PutNdiv(0,1,0,0);
+  // Nd144
+  data[no[Nd144]].PutID(no[Nd144]);
+  data[no[Nd144]].PutNdiv(0,1,0,0);
+  // Nd145
+  data[no[Nd145]].PutID(no[Nd145]);
+  data[no[Nd145]].PutNdiv(0,1,0,0);
+  // Nd146
+  data[no[Nd146]].PutID(no[Nd146]);
+  data[no[Nd146]].PutNdiv(0,1,0,0);
+  // Nd147
+  data[no[Nd147]].PutID(no[Nd147]);
+  data[no[Nd147]].PutNdiv(0,1,0,1);
+  data[no[Nd147]].PutIDnextDecay(no[Pm147]);
+  // Nd148
+  data[no[Nd148]].PutID(no[Nd148]);
+  data[no[Nd148]].PutNdiv(0,1,0,0);
+  data[no[Nd148]].PutIDnextCapture(no[Pm149]);
+  // Nd150
+  data[no[Nd150]].PutID(no[Nd150]);
+  data[no[Nd150]].PutNdiv(0,1,0,0);
+  data[no[Nd150]].PutIDnextCapture(no[Pm151]);
+  // Pm147
+  data[no[Pm147]].PutID(no[Pm147]);
+  data[no[Pm147]].PutNdiv(0,2,0,1);
+  real r_pm7_c[]={0.53,0.47};
+  int id_pm7_c[]={1,1};
+  id_pm7_c[0]=no[Pm148];
+  id_pm7_c[1]=no[Pm148m];
+  data[no[Pm147]].PutData(1,r_pm7_c,id_pm7_c);
+  data[no[Pm147]].PutIDnextDecay(no[Sm147]);
+  // Pm148
+  data[no[Pm148]].PutID(no[Pm148]);
+  data[no[Pm148]].PutNdiv(0,1,0,1);
+  data[no[Pm148]].PutIDnextDecay(no[Sm148]);
+  // Pm148m
+  data[no[Pm148m]].PutID(no[Pm148m]);
+  data[no[Pm148m]].PutNdiv(0,1,0,1);
+  data[no[Pm148m]].PutIDnextCapture(no[Pm149]);
+  data[no[Pm148m]].PutIDnextDecay(no[Pm148]);
+  // Pm149
+  data[no[Pm149]].PutID(no[Pm149]);
+  data[no[Pm149]].PutNdiv(0,1,0,1);
+  data[no[Pm149]].PutIDnextCapture(no[Sm150]);
+  data[no[Pm149]].PutIDnextDecay(no[Sm149]);
+  // Pm151
+  data[no[Pm151]].PutID(no[Pm151]);
+  data[no[Pm151]].PutNdiv(0,1,0,1);
+  data[no[Pm151]].PutIDnextCapture(no[Sm152]);
+  data[no[Pm151]].PutIDnextDecay(no[Sm151]);
+  // Sm147
+  data[no[Sm147]].PutID(no[Sm147]);
+  data[no[Sm147]].PutNdiv(0,1,0,0);
+  // Sm148
+  data[no[Sm148]].PutID(no[Sm148]);
+  data[no[Sm148]].PutNdiv(0,1,0,0);
+  // Sm149
+  data[no[Sm149]].PutID(no[Sm149]);
+  data[no[Sm149]].PutNdiv(0,1,0,0);
+  // Sm150
+  data[no[Sm150]].PutID(no[Sm150]);
+  data[no[Sm150]].PutNdiv(0,1,0,0);
+  // Sm151
+  data[no[Sm151]].PutID(no[Sm151]);
+  data[no[Sm151]].PutNdiv(0,1,0,1);
+  data[no[Sm151]].PutIDnextDecay(no[Eu151]);
+  // Sm152
+  data[no[Sm152]].PutID(no[Sm152]);
+  data[no[Sm152]].PutNdiv(0,1,0,0);
+  data[no[Sm152]].PutIDnextCapture(no[Eu153]);
+  // Eu151
+  data[no[Eu151]].PutID(no[Eu151]);
+  data[no[Eu151]].PutNdiv(0,2,0,0);
+  real r_eu1_c[]={0.645, 0.2698}; // Sum is not 1
+  int id_eu1_c[]={1,1};
+  id_eu1_c[0]=no[Eu152];
+  id_eu1_c[1]=no[Gd152];
+  data[no[Eu151]].PutData(1,r_eu1_c,id_eu1_c);
+  //data[no[Eu151]].PutNdiv(0,1,0,1);
+  //data[no[Eu151]].PutIDnextDecay(no[Gd152]);
+  // Eu152
+  data[no[Eu152]].PutID(no[Eu152]);
+  data[no[Eu152]].PutNdiv(0,1,0,1);
+  data[no[Eu152]].PutIDnextDecay(no[Gd152]);
+  // Eu153
+  data[no[Eu153]].PutID(no[Eu153]);
+  data[no[Eu153]].PutNdiv(0,1,0,0);
+  // Eu154
+  data[no[Eu154]].PutID(no[Eu154]);
+  data[no[Eu154]].PutNdiv(0,1,0,1);
+  data[no[Eu154]].PutIDnextDecay(no[Gd154]);
+  // Eu155
+  data[no[Eu155]].PutID(no[Eu155]);
+  data[no[Eu155]].PutNdiv(0,1,0,1);
+  data[no[Eu155]].PutIDnextDecay(no[Gd155]);
+  // Eu156
+  data[no[Eu156]].PutID(no[Eu156]);
+  data[no[Eu156]].PutNdiv(0,1,0,1);
+  data[no[Eu156]].PutIDnextDecay(no[Gd156]);
+  // Eu157
+  data[no[Eu157]].PutID(no[Eu157]);
+  data[no[Eu157]].PutNdiv(0,1,0,1);
+  data[no[Eu157]].PutIDnextDecay(no[Gd157]);
+  data[no[Eu157]].PutIDnextCapture(no[Gd158]);
+  // Gd154
+  data[no[Gd154]].PutID(no[Gd154]);
+  data[no[Gd154]].PutNdiv(0,1,0,0);
+  // Gd155
+  data[no[Gd155]].PutID(no[Gd155]);
+  data[no[Gd155]].PutNdiv(0,1,0,0);
+  // Gd156
+  data[no[Gd156]].PutID(no[Gd156]);
+  data[no[Gd156]].PutNdiv(0,1,0,0);
+  // Gd157
+  data[no[Gd157]].PutID(no[Gd157]);
+  data[no[Gd157]].PutNdiv(0,1,0,0);
+  // +++ Burnable poison
+  // Er166
+  data[no[Er166]].PutID(no[Er166]);
+  data[no[Er166]].PutNdiv(0,1,0,0);
+  // Er167
+  data[no[Er167]].PutID(no[Er167]);
+  data[no[Er167]].PutNdiv(0,1,0,0);
+  // Hf176
+  data[no[Hf176]].PutID(no[Hf176]);
+  data[no[Hf176]].PutNdiv(0,1,0,0);
+  // Hf177
+  data[no[Hf177]].PutID(no[Hf177]);
+  data[no[Hf177]].PutNdiv(0,1,0,0);
+  // Hf178
+  data[no[Hf178]].PutID(no[Hf178]);
+  data[no[Hf178]].PutNdiv(0,1,0,0);
+  // Hf179
+  data[no[Hf179]].PutID(no[Hf179]);
+  data[no[Hf179]].PutNdiv(0,1,0,0);
+
+
+  // +++ Yield data
+
+  enum name yld_nam[]={
+    Kr83,Kr85,Sr90,Y90,Zr93, Zr95,Zr96,Nb93m,Nb95,Mo95,
+    Mo97,Mo98,Mo99,Mo100,Tc99, Ru100,Ru101,Ru102,Ru103,Ru104,
+    Ru105,Ru106,Rh103,Rh105,Rh106, Pd104,Pd105,Pd106,Pd107,Pd108,
+    Ag107,Ag109,Cd110,Cd111,Cd112, Cd113,Cd114,Cd116,In115,Sn126,
+    Sb125,Sb126m,Sb126,Te127m,I127, I129,I131,I135,Xe131,Xe132,
+    Xe133,Xe134,Xe135,Xe136,Cs133, Cs134,Cs135,Cs137,Ba137m,Ba137,
+    Ba138,Ba140,La139,La140,Ce140, Ce141,Ce144,Pr141,Pr143,Pr144,
+    Nd142,Nd143,Nd144,Nd145,Nd146, Nd147,Nd148,Nd150,Pm147,Pm148m,
+    Pm148,Pm149,Pm151,Sm147,Sm148, Sm149,Sm150,Sm151,Sm152,Eu151,
+    Eu152,Eu153,Eu154,Eu155,Eu156, Eu157,Gd152,Gd154,Gd155,Gd156,
+    Gd157,Gd158,Gd160
+  }; // 103 nuclides
+
+  real u5_yld[]={ // U-235
+   5.38052E-03,   2.74288E-03,   5.90449E-02,   4.29883E-07,   6.39023E-02,
+   6.49607E-02,   6.26407E-02,   7.53133E-11,   1.26475E-06,   6.03518E-09,
+   6.00817E-02,   5.70831E-02,   6.11047E-02,   6.23231E-02,   1.44467E-08,
+   3.02965E-07,   5.08143E-02,   4.23310E-02,   3.02742E-02,   1.83972E-02,
+   9.63843E-03,   4.02306E-03,   3.32127E-11,   1.70062E-08,   5.16929E-08,
+   7.35898E-10,   9.99776E-13,   1.72806E-07,   1.40280E-03,   6.69376E-04,
+   1.33970E-14,   3.44818E-04,   2.54041E-09,   2.00221E-04,   1.60353E-04,
+   1.60748E-04,   1.40363E-04,   1.69140E-04,   1.07631E-04,   5.49319E-04,
+   2.93782E-04,   1.61115E-06,   9.44276E-07,   1.73348E-04,   1.07322E-03,
+   7.17849E-03,   2.88432E-02,   6.28968E-02,   4.27914E-08,   4.29993E-02,
+   6.70193E-02,   7.82582E-02,   2.41917E-03,   6.30593E-02,   8.34814E-09,
+   1.26972E-07,   2.08938E-05,   6.26855E-02,   6.63862E-06,   2.74927E-06,
+   6.70544E-02,   6.29458E-02,   6.35243E-02,   5.46978E-05,   1.47968E-08,
+   5.79671E-02,   5.47242E-02,   1.72961E-11,   5.93879E-02,   1.04230E-06,
+   1.06960E-09,   2.05954E-12,   5.67611E-10,   3.91752E-02,   2.97547E-02,
+   2.25335E-02,   1.66954E-02,   6.48289E-03,   9.45789E-10,   7.81900E-11,
+   3.33850E-11,   1.06635E-02,   4.18377E-03,   1.51966E-14,   1.95956E-12,
+   1.10975E-10,   3.04152E-07,   7.19840E-08,   2.67834E-03,   2.50943E-12,
+   1.22138E-10,   1.61350E-03,   2.68939E-08,   3.20438E-04,   1.31858E-04,
+   6.15279E-05,   5.49710E-12,   6.56853E-12,   8.57808E-11,   7.99844E-10,
+   5.81870E-09,   2.91590E-05,   3.16238E-06,   5.28588E-01
+  };
+
+  real u6_yld[]={ // U-234, U-236, U-237
+   5.22132E-03,   3.02275E-03,   4.52066E-02,   7.67954E-08,   5.69954E-02,
+   6.41135E-02,   5.73422E-02,   7.87386E-12,   1.38018E-07,   5.88457E-10,
+   5.14394E-02,   5.73905E-02,   5.87313E-02,   5.61258E-02,   2.54097E-09,
+   6.02025E-08,   5.29101E-02,   4.92730E-02,   4.20302E-02,   3.37809E-02,
+   2.45692E-02,   1.01846E-02,   5.89693E-12,   9.22991E-09,   3.23668E-08,
+   2.22007E-10,   2.79997E-13,   1.20614E-07,   9.22816E-03,   3.44851E-03,
+   1.25776E-14,   1.43471E-03,   1.84756E-09,   6.52552E-04,   4.76344E-04,
+   3.75237E-04,   3.27243E-04,   3.36882E-04,   5.11055E-04,   2.44519E-03,
+   1.63114E-03,   2.01181E-06,   1.43816E-06,   3.10802E-04,   1.92501E-03,
+   9.82628E-03,   3.03689E-02,   5.61647E-02,   5.53001E-09,   4.30734E-02,
+   7.02589E-02,   8.07309E-02,   1.58468E-03,   6.40344E-02,   2.24998E-09,
+   1.70998E-07,   4.33665E-06,   6.12883E-02,   1.34526E-06,   4.80725E-07,
+   6.15386E-02,   5.81584E-02,   5.84611E-02,   4.49995E-06,   1.23999E-09,
+   5.54610E-02,   5.20610E-02,   1.17999E-12,   6.08848E-02,   1.72419E-07,
+   1.09981E-10,   1.21999E-13,   9.19304E-11,   3.66819E-02,   2.94311E-02,
+   2.34066E-02,   1.74054E-02,   7.29555E-03,   9.90982E-11,   3.00691E-09,
+   1.10305E-09,   1.36836E-02,   4.22637E-03,   8.44410E-16,   1.25999E-13,
+   1.13999E-11,   1.25047E-06,   9.83990E-09,   3.87746E-03,   2.94997E-13,
+   2.00512E-11,   2.55329E-03,   8.72991E-09,   9.22833E-04,   3.36478E-04,
+   2.30794E-04,   7.20956E-13,   8.94991E-13,   2.84997E-11,   2.92997E-10,
+   3.29997E-09,   1.10789E-04,   1.93907E-05,   5.11207E-01
+  };
+
+  real u8_yld[]={ // U-238, Pu-238
+   3.86596E-03,   1.40107E-03,   3.24308E-02,   2.63295E-09,   5.00091E-02,
+   5.10681E-02,   5.90907E-02,   1.81353E-13,   6.16133E-09,   2.60877E-11,
+   5.57464E-02,   5.74670E-02,   6.19570E-02,   6.69985E-02,   9.97161E-11,
+   3.29396E-09,   6.08223E-02,   6.31981E-02,   6.20956E-02,   5.02329E-02,
+   3.93933E-02,   2.53108E-02,   1.78709E-13,   7.05325E-10,   4.12722E-09,
+   9.52300E-12,   3.26382E-09,   1.53791E-08,   1.29612E-02,   5.98748E-03,
+   1.68472E-16,   2.68437E-03,   8.84320E-11,   8.02051E-04,   6.50398E-04,
+   5.18271E-04,   3.93598E-04,   4.17687E-04,   3.37741E-04,   6.30423E-04,
+   5.25418E-04,   3.39784E-08,   2.42898E-08,   1.75223E-04,   1.08538E-03,
+   9.99757E-03,   3.23857E-02,   6.78305E-02,   4.14487E-11,   5.14645E-02,
+   6.60617E-02,   7.74561E-02,   2.79477E-04,   6.85057E-02,   2.54298E-11,
+   3.14368E-09,   1.88446E-07,   6.09070E-02,   5.58359E-08,   1.99528E-08,
+   5.55928E-02,   5.98817E-02,   5.90335E-02,   1.53179E-07,   1.93226E-11,
+   5.48315E-02,   4.53722E-02,   4.55463E-15,   4.56657E-02,   3.25433E-09,
+   7.70779E-13,   4.01763E-16,   1.59436E-12,   3.75588E-02,   3.39528E-02,
+   2.52979E-02,   2.08160E-02,   1.26605E-02,   1.09128E-12,   5.90368E-11,
+   2.16569E-11,   1.60757E-02,   8.00639E-03,   2.16659E-18,   8.05193E-16,
+   1.39163E-13,   8.01077E-08,   5.12601E-10,   5.20747E-03,   2.51437E-15,
+   5.50634E-09,   4.10948E-03,   3.44404E-10,   1.32657E-03,   6.74806E-04,
+   3.87188E-04,   1.98446E-10,   1.57184E-14,   6.22730E-13,   1.29151E-11,
+   2.10246E-10,   1.72993E-04,   3.22775E-05,   4.11849E-01,
+  };
+
+  real np7_yld[]={ // Np-237, -239
+   4.81007E-03,   2.00542E-03,   3.32645E-02,   5.29981E-07,   5.13900E-02,
+   5.69951E-02,   5.52528E-02,   9.67037E-11,   1.03267E-06,   4.43845E-09,
+   6.20551E-02,   6.05606E-02,   6.15581E-02,   6.59458E-02,   3.04904E-08,
+   6.92061E-07,   6.17697E-02,   5.87815E-02,   5.58313E-02,   4.22259E-02,
+   3.16626E-02,   2.24408E-02,   1.20501E-10,   1.23802E-07,   6.49501E-07,
+   3.77895E-09,   6.74009E-12,   2.42046E-06,   1.69243E-02,   9.51979E-03,
+   4.59106E-13,   4.47322E-03,   5.29616E-08,   9.59671E-04,   7.26509E-04,
+   5.09049E-04,   5.13047E-04,   4.82016E-04,   4.87956E-04,   1.62776E-03,
+   1.31748E-03,   9.12623E-06,   6.52398E-06,   4.96743E-04,   3.07423E-03,
+   1.39450E-02,   3.69768E-02,   6.65468E-02,   1.23308E-07,   5.00801E-02,
+   6.63974E-02,   7.38955E-02,   8.82934E-03,   6.81602E-02,   6.08009E-08,
+   3.11003E-06,   6.07309E-05,   6.30488E-02,   1.25320E-05,   4.47827E-06,
+   6.16462E-02,   5.49114E-02,   5.64278E-02,   4.64007E-05,   2.42009E-08,
+   5.43925E-02,   4.19620E-02,   5.57008E-11,   4.70365E-02,   2.36196E-06,
+   3.39955E-09,   4.64007E-12,   1.41679E-09,   3.48222E-02,   2.79800E-02,
+   2.21081E-02,   1.72929E-02,   9.83449E-03,   2.81004E-09,   6.92850E-08,
+   2.54164E-08,   1.27434E-02,   7.13741E-03,   4.35006E-14,   5.41008E-12,
+   2.75004E-10,   1.65519E-05,   1.76002E-07,   4.56312E-03,   1.92003E-11,
+   6.95132E-10,   3.59420E-03,   1.99002E-07,   1.19201E-03,   9.99145E-04,
+   3.32957E-04,   2.49982E-11,   3.79005E-11,   7.59031E-10,   1.02008E-08,
+   4.73007E-08,   1.32023E-04,   2.59092E-05,   4.25193E-01,
+  };
+
+  real p0_yld[]={ // Pu-240
+   3.02678E-03,   1.19639E-03,   1.88096E-02,   1.56007E-07,   3.77965E-02,
+   4.39651E-02,   4.91421E-02,   4.38226E-11,   4.89488E-07,   2.11949E-09,
+   5.19829E-02,   5.42848E-02,   5.97430E-02,   6.06893E-02,   1.65116E-08,
+   3.24071E-07,   6.05171E-02,   6.08056E-02,   6.71192E-02,   5.91927E-02,
+   5.53267E-02,   4.97594E-02,   1.64716E-10,   2.10320E-07,   1.06828E-06,
+   4.78144E-09,   1.73017E-11,   3.98181E-06,   4.15073E-02,   3.03066E-02,
+   1.49914E-12,   1.79477E-02,   2.07986E-07,   5.02996E-03,   2.39244E-03,
+   1.57133E-03,   9.86689E-04,   7.93380E-04,   6.62287E-04,   2.78047E-03,
+   1.05375E-03,   1.11799E-05,   7.99204E-06,   5.81826E-04,   3.60068E-03,
+   1.05157E-02,   3.54507E-02,   6.74359E-02,   1.28517E-07,   4.80700E-02,
+   7.00558E-02,   7.04588E-02,   6.98431E-03,   6.74760E-02,   4.25042E-08,
+   1.82018E-06,   4.43302E-05,   6.49276E-02,   1.36235E-05,   4.86834E-06,
+   6.51144E-02,   5.11033E-02,   5.87087E-02,   2.86128E-05,   2.46027E-08,
+   4.76486E-02,   4.06648E-02,   3.05030E-11,   4.72102E-02,   1.25255E-06,
+   1.71993E-09,   3.74037E-12,   8.68521E-10,   3.27723E-02,   2.73685E-02,
+   2.23294E-02,   1.91500E-02,   1.13942E-02,   7.88551E-11,   3.55600E-08,
+   1.30448E-08,   1.36919E-02,   8.43150E-03,   5.27150E-14,   4.45044E-12,
+   2.64025E-10,   1.14040E-05,   2.20022E-07,   6.57577E-03,   1.49015E-11,
+   5.09934E-10,   5.79669E-03,   1.74017E-07,   2.47600E-03,   1.75429E-03,
+   1.30384E-03,   1.83439E-11,   5.31053E-11,   1.45016E-09,   2.04027E-08,
+   1.71017E-07,   8.50324E-04,   3.04528E-04,   3.51999E-01,
+  };
+  real p9_yld[]={ // Pu-239
+   2.94999E-03,   1.26270E-03,   2.10110E-02,   9.98275E-07,   3.89629E-02,
+   4.89422E-02,   5.06651E-02,   4.42997E-10,   5.72484E-06,   2.74444E-08,
+   5.44524E-02,   5.78854E-02,   6.14028E-02,   6.82630E-02,   1.04734E-07,
+   2.07106E-06,   5.89788E-02,   5.96460E-02,   6.95001E-02,   5.92626E-02,
+   5.35131E-02,   4.28510E-02,   8.37269E-10,   5.23168E-07,   1.42473E-06,
+   1.83330E-08,   5.75186E-11,   4.76613E-06,   3.36101E-02,   2.16852E-02,
+   6.07096E-12,   1.87949E-02,   3.82866E-07,   3.03603E-03,   1.33308E-03,
+   6.41202E-04,   6.06204E-04,   4.95122E-04,   3.56475E-04,   2.65697E-03,
+   1.11031E-03,   2.55112E-05,   1.49518E-05,   6.82350E-04,   4.21312E-03,
+   1.39340E-02,   3.84661E-02,   6.44681E-02,   6.86265E-07,   5.39310E-02,
+   6.97556E-02,   7.63104E-02,   1.15238E-02,   6.62560E-02,   2.65086E-07,
+   9.89319E-06,   1.59157E-04,   6.72736E-02,   4.71536E-05,   1.95279E-05,
+   6.02168E-02,   5.54526E-02,   5.61759E-02,   1.28212E-04,   1.80063E-07,
+   5.25758E-02,   3.73679E-02,   4.04131E-10,   4.42862E-02,   4.01049E-06,
+   1.95038E-08,   3.65118E-11,   3.42371E-09,   2.99155E-02,   2.46206E-02,
+   2.04281E-02,   1.63468E-02,   9.65165E-03,   1.45047E-08,   2.36240E-07,
+   1.00868E-07,   1.23920E-02,   7.71947E-03,   5.52179E-13,   5.43176E-11,
+   2.68090E-09,   1.15842E-05,   1.12036E-06,   5.85170E-03,   1.72056E-10,
+   4.60867E-09,   3.63694E-03,   9.22299E-07,   1.65470E-03,   1.18375E-03,
+   7.40532E-04,   2.07640E-10,   4.91159E-10,   7.15259E-09,   7.18298E-08,
+   4.45144E-07,   4.07384E-04,   9.71243E-05,   3.58624E-01,
+  };
+  real p1_yld[]={ // Pu-241, Am-242,-242m, Cm-243,-245
+   2.11888E-03,   8.03600E-04,   1.57130E-02,   3.11072E-08,   3.09401E-02,
+   4.07446E-02,   4.59351E-02,   5.59072E-12,   9.21912E-08,   4.40792E-10,
+   4.91168E-02,   5.08645E-02,   6.23345E-02,   6.17381E-02,   2.84080E-09,
+   7.12243E-08,   6.00422E-02,   6.38270E-02,   6.14402E-02,   6.90977E-02,
+   6.10735E-02,   6.25044E-02,   1.05630E-11,   2.58673E-08,   2.14299E-07,
+   5.10099E-10,   9.26261E-13,   7.16305E-07,   5.20110E-02,   3.92531E-02,
+   5.78163E-14,   2.26164E-02,   2.45559E-08,   5.69898E-03,   2.31089E-03,
+   1.43581E-03,   7.25140E-04,   2.86208E-04,   4.21367E-04,   7.55492E-04,
+   4.24004E-04,   9.35268E-07,   5.48150E-07,   3.17687E-04,   1.96759E-03,
+   7.35819E-03,   2.84532E-02,   7.05441E-02,   6.40188E-09,   4.22005E-02,
+   6.76957E-02,   7.47840E-02,   2.31400E-03,   6.66450E-02,   2.52071E-09,
+   1.85052E-07,   6.77734E-06,   6.93464E-02,   2.00179E-06,   8.29007E-07,
+   6.69891E-02,   6.21503E-02,   5.89717E-02,   6.84193E-06,   2.40069E-09,
+   4.96639E-02,   4.33165E-02,   1.79050E-12,   4.70672E-02,   1.91067E-07,
+   1.50018E-10,   1.75049E-13,   1.04912E-10,   3.34377E-02,   2.86224E-02,
+   2.36779E-02,   1.98980E-02,   1.24852E-02,   1.56042E-10,   4.68957E-09,
+   2.00232E-09,   1.52325E-02,   9.36824E-03,   2.24928E-15,   2.62074E-13,
+   2.16061E-11,   2.78214E-06,   3.41096E-08,   7.46591E-03,   1.11031E-12,
+   5.79826E-11,   5.48159E-03,   3.62102E-08,   2.41672E-03,   1.76058E-03,
+   1.37159E-03,   2.61054E-12,   4.75134E-12,   1.23035E-10,   2.31069E-09,
+   2.93082E-08,   8.62483E-04,   1.91697E-04,   3.08519E-01,
+  };
+  real p2_yld[]={ // Pu-242, Am-241,-243, Cm-242, -244, -246
+   2.39524E-03,   8.37860E-04,   1.72731E-02,   1.51994E-08,   3.13660E-02,
+   4.02262E-02,   4.47473E-02,   2.70457E-12,   5.31471E-08,   2.27440E-10,
+   4.88292E-02,   5.13470E-02,   5.36173E-02,   5.65623E-02,   1.30101E-09,
+   3.16029E-08,   5.88359E-02,   5.82541E-02,   5.87684E-02,   5.84231E-02,
+   5.64217E-02,   5.33303E-02,   5.04607E-12,   1.29502E-08,   8.32001E-08,
+   2.09363E-10,   5.03007E-13,   3.10063E-07,   5.01321E-02,   4.21459E-02,
+   3.04004E-14,   3.25676E-02,   2.65709E-08,   1.28204E-02,   6.44542E-03,
+   3.02921E-03,   1.51455E-03,   9.47453E-04,   1.02189E-03,   1.76251E-03,
+   6.66717E-04,   1.73777E-06,   1.24226E-06,   4.22079E-04,   2.61398E-03,
+   8.23003E-03,   3.18720E-02,   6.88949E-02,   1.00402E-08,   4.56735E-02,
+   6.59243E-02,   7.42357E-02,   2.64428E-03,   6.87596E-02,   2.64004E-09,
+   1.48002E-07,   5.83800E-06,   6.43036E-02,   2.09971E-06,   7.50327E-07,
+   6.28325E-02,   5.00497E-02,   6.01235E-02,   3.21004E-06,   1.60002E-09,
+   5.10985E-02,   4.25756E-02,   1.19002E-12,   4.68003E-02,   1.01495E-07,
+   7.29892E-11,   1.22002E-13,   6.00275E-11,   3.46686E-02,   3.00273E-02,
+   2.41926E-02,   2.06327E-02,   1.36024E-02,   9.64009E-11,   2.68653E-09,
+   9.85522E-10,   1.61448E-02,   1.02467E-02,   3.46226E-16,   1.97003E-13,
+   1.68002E-11,   1.79123E-06,   3.10004E-08,   8.34760E-03,   7.01010E-13,
+   3.53295E-11,   6.55417E-03,   2.28003E-08,   3.67723E-03,   2.65657E-03,
+   1.83915E-03,   1.27010E-12,   4.10006E-12,   1.45002E-10,   2.94007E-09,
+   3.42005E-08,   1.22612E-03,   4.59798E-04,   3.33543E-01,
+  };
+
+  // Nb93m -> Mo95 (7->9)
+  // Rh106 -> Pd108 (24->29)
+  // Sb126m -> Sb126 (41->42)
+  // Ba137m -> Ba137 (58->59)
+  // Pr144 -> Nd144 (69->72)
+  int bef[]={7,24,41,58,69};
+  int aft[]={9,29,42,59,72};
+  for(int i=0;i<5;i++){
+    int t1=aft[i];
+    int t2=bef[i];
+    u5_yld[t1]+=u5_yld[t2]; u6_yld[t1]+=u6_yld[t2]; u8_yld[t1]+=u8_yld[t2];
+    np7_yld[t1]+=np7_yld[t2]; p0_yld[t1]+=p0_yld[t2]; p1_yld[t1]+=p1_yld[t2];
+    p2_yld[t1]+=p2_yld[t2]; p9_yld[t1]+=p9_yld[t2];
+  };
+
+  int index=0;
+  for(int i=0;i<103;i++){
+    int id=no[yld_nam[i]];
+    if(id>0){
+      data[no[U234]].PutIDnextFission(index,id,u6_yld[i]);
+      data[no[U235]].PutIDnextFission(index,id,u5_yld[i]);
+      data[no[U236]].PutIDnextFission(index,id,u6_yld[i]);
+      data[no[U237]].PutIDnextFission(index,id,u6_yld[i]);
+      data[no[U238]].PutIDnextFission(index,id,u8_yld[i]);
+      data[no[Np237]].PutIDnextFission(index,id,np7_yld[i]);
+      data[no[Np239]].PutIDnextFission(index,id,np7_yld[i]);
+      data[no[Pu238]].PutIDnextFission(index,id,u8_yld[i]);
+      data[no[Pu239]].PutIDnextFission(index,id,p9_yld[i]);
+      data[no[Pu240]].PutIDnextFission(index,id,p0_yld[i]);
+      data[no[Pu241]].PutIDnextFission(index,id,p1_yld[i]);
+      data[no[Pu242]].PutIDnextFission(index,id,p2_yld[i]);
+      data[no[Am241]].PutIDnextFission(index,id,p2_yld[i]);
+      data[no[Am242]].PutIDnextFission(index,id,p1_yld[i]);
+      data[no[Am242m]].PutIDnextFission(index,id,p1_yld[i]);
+      data[no[Am243]].PutIDnextFission(index,id,p2_yld[i]);
+      data[no[Cm242]].PutIDnextFission(index,id,p2_yld[i]);
+      data[no[Cm243]].PutIDnextFission(index,id,p1_yld[i]);
+      data[no[Cm244]].PutIDnextFission(index,id,p2_yld[i]);
+      data[no[Cm245]].PutIDnextFission(index,id,p1_yld[i]);
+      data[no[Cm246]].PutIDnextFission(index,id,p2_yld[i]);
+      index++;
+    };
+  };
+};
+

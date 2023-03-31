@@ -1,0 +1,894 @@
+#include <cstdlib>
+#include <iostream>
+#include <fstream>
+#include <cstdio>
+#include <cmath>
+#include "FRDesignTool.h"
+
+using namespace std;
+
+const real avo=6.02205e23;
+const real atomic_weight_o=15.9949146;
+const real atomic_weight_sodium=22.989770;
+const real atomic_weight_pu_u[]={
+    238.0496, 239.0522, 240.0538, 241.0568, 242.0587,
+    241.0568, 235.0439, 238.0508 };
+    // Pu-238~-242, Am-241, U-235,-238
+const real atomic_weight_sus[]={
+  54.938, 58.69, 51.99561, 95.94, 55.847};
+    // Mn-55, Ni, Cr, Mo, Fe 
+
+// +++ FRDTComposition +++
+
+void FRDTComposition::PutNucnum(int inp)
+{
+  nucnum=inp;
+  nucid.resize(nucnum);
+  density.resize(nucnum,0.);
+};
+
+void FRDTComposition::ShowSelf(real factor)
+{
+  cout.setf(ios::scientific);
+  cout.precision(5);
+  for(int i=0;i<nucnum;i++){
+    cout<<nucid[i]<<"  "<<density[i]*factor<<"\n";
+  };
+};
+
+// +++ FRDTFuelComposition +++
+
+FRDTFuelComposition::FRDTFuelComposition()
+{
+  nucnum=22;
+  nucnum_pu=6;
+  nucnum_hm=8;
+  nucid.resize(nucnum);
+  density.resize(nucnum,0.);
+  int nucid_initial[]={
+    9434,9437,9440,9443,9446, 9543,9228,9237,
+    9231,9346,9547,9549,9631, 9634,9637,9640,9643,9995,
+    9998,9999,9991,
+    825
+  };
+  for(int i=0;i<nucnum;i++){
+    nucid[i]=nucid_initial[i];
+  };
+
+  pu_fissile_enrichment=0.;
+  pu_enrichment=0.;
+
+  u5_enrichment=0.2;
+  o_m=1.97;
+  pellet_theoretical_density=85.;
+};
+
+void FRDTFuelComposition::PutPlutoniumRatio(real *inp)
+{
+  real sum=0.;
+  for(int i=0;i<nucnum_pu;i++){
+    sum+=inp[i];
+  };
+  if(sum<99.999||sum>100.001){
+    cout<<"Error in FRDTFuelComposition::PutPlutoniumRatio.\n";
+    cout<<"Sum of Pu-composition ratio is not 100.\n";
+    cout<<"Sum is "<<sum<<"\n";
+    exit(0);
+  };
+
+  if(pu_fissile_enrichment==0.){
+    pu_fissile_enrichment=pu_enrichment*(inp[1]+inp[3])*0.01;
+  };
+  if(pu_enrichment==0.){
+    pu_enrichment=pu_fissile_enrichment/((inp[1]+inp[3])*0.01);
+  };
+
+  vector<real> w_m(nucnum_hm);
+  real sum_wm_pu=0.;
+  for(int i=0;i<nucnum_pu;i++){
+    w_m[i]=inp[i]/atomic_weight_pu_u[i];
+    sum_wm_pu+=w_m[i];
+  };
+  w_m[nucnum_pu]=u5_enrichment/atomic_weight_pu_u[nucnum_pu]; // u5
+  w_m[nucnum_pu+1]=(100.-u5_enrichment)/atomic_weight_pu_u[nucnum_pu+1]; // u8
+  real sum_wm_u=w_m[nucnum_pu]+w_m[nucnum_pu+1];
+
+  vector<real> ratio_at(nucnum_hm); // atomic ratio in at%
+  real tmp=1./sum_wm_pu;
+  for(int i=0;i<nucnum_hm;i++){
+    if(i>=nucnum_pu)tmp=1./sum_wm_u;
+    ratio_at[i]=w_m[i]*tmp*100.;
+  };
+
+  vector<real> at_w(nucnum_hm); // atomic weight in given composition
+  for(int i=0;i<nucnum_hm;i++){
+    at_w[i]=ratio_at[i]*atomic_weight_pu_u[i];
+  };
+
+  real averaged_weight_pu=0.;
+  for(int i=0;i<nucnum_pu;i++){
+    averaged_weight_pu+=at_w[i];
+  };
+  averaged_weight_pu*=0.01;
+
+  real averaged_weight_u=0.;
+  for(int i=nucnum_pu;i<nucnum_hm;i++){
+    averaged_weight_u+=at_w[i];
+  };
+  averaged_weight_u*=0.01;
+
+  real pu_enrichment_wt=pu_fissile_enrichment*100/(inp[1]+inp[3]);
+  real pu_enrichment_at=(pu_enrichment_wt/averaged_weight_pu)/
+    (pu_enrichment_wt/averaged_weight_pu+(100.-pu_enrichment_wt)/averaged_weight_u)*100.;
+  real tmp2=pu_enrichment_at*(averaged_weight_pu+o_m*atomic_weight_o);
+  real puo2_enrichment_wt=tmp2*100./(tmp2+(100.-pu_enrichment_at)
+		     *(averaged_weight_u+o_m*atomic_weight_o));
+
+  real MOXdensity=0.48*(puo2_enrichment_wt/100.)+10.96-2.5*(2.-o_m); 
+  // given in JNC TN8410 2000-011, p.123
+  real pu_density=MOXdensity*puo2_enrichment_wt/100./(averaged_weight_pu+o_m*atomic_weight_o)*avo*1e-24;  
+  real u_density=MOXdensity*(1.-puo2_enrichment_wt/100.)/(averaged_weight_u+o_m*atomic_weight_o)*avo*1e-24;
+
+  real base=pu_density;
+  for(int i=0;i<nucnum_hm;i++){
+    if(i==nucnum_pu)base=u_density;
+    density[i]=base*ratio_at[i]/100.*pellet_theoretical_density/100.;
+
+  };
+  density[nucnum-1]=(pu_density+u_density)*o_m*pellet_theoretical_density/100.; // O-16
+};
+
+void FRDTFuelComposition::ShowPuEnrichment()
+{
+  cout<<"\n\n";
+  cout<<"  Pu   enrichment : "<<pu_enrichment<<"\n";
+  cout<<"  Pu-f enrichment : "<<pu_fissile_enrichment<<"\n";
+};
+
+// +++ FRDTSUSComposition +++
+
+FRDTSUSComposition::FRDTSUSComposition()
+{
+  PutNucnum(5);
+  nucid[0]=2525;
+  nucid[1]=2800;
+  nucid[2]=2400;
+  nucid[3]=4200;
+  nucid[4]=2600;
+};
+
+void FRDTSUSComposition::PutDensityAndRatio(real dinp,real *inp)
+{
+  real sum=0.;
+  for(int i=0;i<nucnum;i++){
+    sum+=inp[i];
+  };
+  if(sum<99.999||sum>100.001){
+    cout<<"Error in FRDTSUSComposition::PutRatio.\n";
+    cout<<"Sum of composition ratio is not 100.\n";
+    exit(0);
+  };
+
+  for(int i=0;i<nucnum;i++){
+    density[i]=dinp*inp[i]*0.01/atomic_weight_sus[i]*avo*1e-24;
+  };
+};
+
+// +++ FRDTB4CComposition +++
+
+FRDTB4CComposition::FRDTB4CComposition(real b10c_wt,real theo_den)
+{
+  PutNucnum(3);
+  nucid[0]=525;
+  nucid[1]=528;
+  nucid[2]=600;
+
+  real atw_b10=10.0129380;
+  real atw_b11=11.0093050;
+  real atw_c=12.;
+
+  real sum=b10c_wt/atw_b10+(1.-b10c_wt)/atw_b11;
+  real b10c=b10c_wt/atw_b10/sum; // wt->at
+
+  real atw_b=b10c*atw_b10+(1.-b10c)*atw_b11;
+  real b4c_den=-1.869300912e-3*b10c*100.+2.553556231;
+
+  real b_den=b4c_den*4./(atw_b*4.+atw_c)*avo*1e-24;
+  b_den*=theo_den;
+  density[0]=b_den*b10c;
+  density[1]=b_den*(1.-b10c);
+  density[2]=b_den/4.;
+};
+
+// +++ FRDTBaseGeometry +++
+
+FRDTBaseGeometry::FRDTBaseGeometry()
+{
+  assembly_pitch=115.6;
+  pin_outer_diameter=6.5;
+  pin_thickness=0.47;
+  number_of_pin=169;
+  spacerwire_diameter=1.32;
+  spacerwire_pitch=307;
+  pellet_outer_diameter=5.4;
+  pellet_invoid_diameter=0.;
+};
+
+real FRDTBaseGeometry::GetAssemblyVolume()
+{
+  return assembly_pitch*assembly_pitch*sqrt(3.)*0.5;
+};
+
+real FRDTBaseGeometry::GetCladVolume()
+{
+  real tmp=pin_outer_diameter*0.5;
+  return (pow(tmp,2)-pow(tmp-pin_thickness,2))*PI*number_of_pin;
+};
+
+real FRDTBaseGeometry::GetSpacerwireVolume()
+{
+  real tmp1=pow(spacerwire_diameter*0.5,2);
+  real tmp2=sqrt(pow(spacerwire_pitch,2)+pow(pin_outer_diameter*PI,2))/spacerwire_pitch*PI*number_of_pin;
+  return tmp1*tmp2;
+};
+
+real FRDTBaseGeometry::GetPelletVolume()
+{
+  real tmp1=pow(pellet_outer_diameter*0.5,2)-pow(pellet_invoid_diameter*0.5,2);
+  tmp1*=(PI*number_of_pin);
+  return tmp1;
+};
+
+real FRDTBaseGeometry::GetPelletVoidVolume()
+{
+  real tmp1=pow(pellet_invoid_diameter*0.5,2);
+  tmp1*=(PI*number_of_pin);
+  return tmp1;
+};
+
+real FRDTBaseGeometry::GetPelletGapVolume()
+{
+  real tmp1=pow(pin_outer_diameter*0.5-pin_thickness,2);
+  real tmp2=pow(pellet_outer_diameter*0.5,2);
+  return (tmp1-tmp2)*PI*number_of_pin;
+};
+
+real FRDTBaseGeometry::GetWholePinVolume()
+{
+  return pow(pin_outer_diameter*0.5,2)*PI*number_of_pin;
+};
+
+// +++ FRDTSubAssemblyGeometry +++
+
+FRDTSubAssemblyGeometry::FRDTSubAssemblyGeometry()
+{
+  duct_outersize=110.6;
+  duct_thickness=3.;
+};
+
+real FRDTSubAssemblyGeometry::GetDuctVolume()
+{
+  return (pow(duct_outersize,2)-pow(duct_outersize-2.*duct_thickness,2))*sqrt(3.)*0.5;
+};
+
+real FRDTSubAssemblyGeometry::GetOutDuctVolume()
+{
+  return GetAssemblyVolume()-(pow(duct_outersize,2)*sqrt(3.)*0.5);
+};
+
+real FRDTSubAssemblyGeometry::GetCoolantVolume()
+{
+  return GetAssemblyVolume()-GetDuctVolume()-GetWholePinVolume()-GetSpacerwireVolume();
+};
+
+// +++ FRDTControlRodGeometry +++
+
+real FRDTControlRodGeometry::GetGuidetubeVolume()
+{
+  real tmp1=pow(guidetube_outer_diameter*0.5,2);
+  real tmp2=pow(guidetube_outer_diameter*0.5-guidetube_thickness,2);
+  return (tmp1-tmp2)*PI;
+};
+
+real FRDTControlRodGeometry::GetShieldtubeVolume()
+{
+  real tmp1=pow(shieldtube_outer_diameter*0.5,2);
+  real tmp2=pow(shieldtube_outer_diameter*0.5-shieldtube_thickness,2);
+  return (tmp1-tmp2)*PI;
+};
+
+real FRDTControlRodGeometry::GetCoolantVolume()
+{
+  real ret=GetAssemblyVolume();
+  ret-=GetGuidetubeVolume();
+  ret-=GetShieldtubeVolume();
+  ret-=GetWholePinVolume();
+  ret-=GetSpacerwireVolume();
+  return ret;
+};
+
+real FRDTControlRodGeometry::GetShieldtubeInsideVolume()
+{
+  return PI*pow(shieldtube_outer_diameter*0.5-shieldtube_thickness,2);
+};
+
+// +++ FRDTSubAssembly
+
+FRDTSubAssembly::FRDTSubAssembly()
+{
+  sodium_number_density=0.;
+  exist_fuel=false;
+  exist_sus=false;
+  exist_geom=false;
+};
+
+void FRDTSubAssembly::PutSodiumDensity(real inp)
+{
+  sodium_number_density=inp/atomic_weight_sodium*avo*1e-24;
+};
+
+void FRDTSubAssembly::PutTemperature(real tmp1,real tmp2)
+{
+  if(tmp2==0.)tmp2=tmp1;
+  temperature=tmp1;
+  sodium_temperature=tmp2;
+};
+
+void FRDTSubAssembly::CheckExistAllData()
+{
+  if(!exist_fuel){
+    cout<<"Error in FRDTSubAssembly::CalHomogenizedNumberDensity.\n";
+    cout<<"Fuel data is not yet put to this instance.\n";
+    exit(0);
+  };
+  if(!exist_sus){
+    cout<<"Error in FRDTSubAssembly::CalHomogenizedNumberDensity.\n";
+    cout<<"SUS data is not yet put to this instance.\n";
+    exit(0);
+  };
+  if(!exist_geom){
+    cout<<"Error in FRDTSubAssembly::CalHomogenizedNumberDensity.\n";
+    cout<<"Geometry data is not yet put to this instance.\n";
+    exit(0);
+  };
+};
+
+void FRDTSubAssembly::ShowHomogenizedNumberDensity()
+{
+  CheckExistAllData();
+
+  real factor=fuelsa_geometry->GetPelletVolume()/fuelsa_geometry->GetAssemblyVolume();
+  fuel_composition->ShowSelf(factor);  
+
+  cout<<"1125  "<<sodium_number_density*fuelsa_geometry->GetCoolantVolume()/fuelsa_geometry->GetAssemblyVolume()<<"\n";
+
+  real factor2=(fuelsa_geometry->GetDuctVolume()+fuelsa_geometry->GetPinVolume()+fuelsa_geometry->GetSpacerwireVolume())/fuelsa_geometry->GetAssemblyVolume();
+  sus_composition->ShowSelf(factor2);
+};
+
+void FRDTSubAssembly::ShowHeterogeneousNumberDensity()
+{
+  cout<<"+++ Fuel +++\n";
+  fuel_composition->ShowSelf();
+  cout<<"+++ SUS +++\n";
+  sus_composition->ShowSelf();
+  cout<<"+++ Coolant and spacer wire +++\n";
+  real cvol=fuelsa_geometry->GetCoolantVolume();
+  real wvol=fuelsa_geometry->GetSpacerwireVolume();
+  cout<<"1125  "<<sodium_number_density*cvol/(cvol+wvol)<<"\n";
+  sus_composition->ShowSelf(wvol/(cvol+wvol));
+};
+
+void FRDTSubAssembly::PutHomogenizedNumberDensity(Medium &med)
+{
+  CheckExistAllData();
+
+  real factor=fuelsa_geometry->GetPelletVolume()/fuelsa_geometry->GetAssemblyVolume();
+  for(int i=0;i<fuel_composition->GetNucnum();i++){
+    //med.GetNuclide(fuel_composition->GetNucid(i)).PutDensity(fuel_composition->GetDensity(i)*factor);
+    if(med.ExistNuclide(fuel_composition->GetNucid(i)))med.GetNuclide(fuel_composition->GetNucid(i)).PutDensity(fuel_composition->GetDensity(i)*factor);
+  };
+  med.GetNuclide(1125).PutDensity(sodium_number_density*fuelsa_geometry->GetCoolantVolume()/fuelsa_geometry->GetAssemblyVolume());
+  real factor2=(fuelsa_geometry->GetDuctVolume()+fuelsa_geometry->GetPinVolume()+fuelsa_geometry->GetSpacerwireVolume())/fuelsa_geometry->GetAssemblyVolume();
+  for(int i=0;i<sus_composition->GetNucnum();i++){
+    med.GetNuclide(sus_composition->GetNucid(i)).PutDensity(sus_composition->GetDensity(i)*factor2);
+  };
+};
+
+// +++ FRDTControlRod +++
+
+void FRDTControlRod::PutSodiumDensity(real inp)
+{
+  sodium_number_density=inp/atomic_weight_sodium*avo*1e-24;
+};
+
+void FRDTControlRod::ShowHomogenizedNumberDensity()
+{
+  real tv=cr_geometry->GetAssemblyVolume();
+  real factor=cr_geometry->GetPelletVolume()/tv;
+  b4c_composition->ShowSelf(factor);  
+
+  cout<<"1125  "<<sodium_number_density*cr_geometry->GetCoolantVolume()/tv<<"\n";
+
+  real ssv=cr_geometry->GetGuidetubeVolume();
+  ssv+=cr_geometry->GetShieldtubeVolume();
+  ssv+=cr_geometry->GetCladVolume();
+  ssv+=cr_geometry->GetSpacerwireVolume();
+  real factor2=ssv/tv;
+  sus_composition->ShowSelf(factor2);
+};
+
+void FRDTControlRod::ShowShieldtubeInsideHomogenizedNumberDensity()
+{
+  real tv=cr_geometry->GetShieldtubeInsideVolume();
+  real factor=cr_geometry->GetPelletVolume()/tv;
+  b4c_composition->ShowSelf(factor);  
+
+  real cv=tv-cr_geometry->GetWholePinVolume();
+  cv-=cr_geometry->GetSpacerwireVolume();
+  cout<<"1125  "<<sodium_number_density*cv/tv<<"\n";
+
+  real ssv=cr_geometry->GetCladVolume();
+  ssv+=cr_geometry->GetSpacerwireVolume();
+  real factor2=ssv/tv;
+  sus_composition->ShowSelf(factor2);
+};
+
+void FRDTControlRod::ShowGapSmearedCladNumberDensity()
+{
+  real v1=cr_geometry->GetWholePinVolume();
+  real v2=cr_geometry->GetCladVolume();
+  real v3=cr_geometry->GetPelletVolume();
+  real factor=v2/(v1-v3);
+  sus_composition->ShowSelf(factor);
+};
+
+void FRDTControlRod::ShowSpacerwireSmearedCoolantNumberDensity()
+{
+  real total_v=cr_geometry->GetShieldtubeInsideVolume();
+  real wpin_v=cr_geometry->GetWholePinVolume();
+  real swire_v=cr_geometry->GetSpacerwireVolume();
+  real na_v=total_v-wpin_v-swire_v;
+  cout<<"1125  "<<sodium_number_density*na_v/(na_v+swire_v)<<"\n";
+  real factor=swire_v/(swire_v+na_v);
+  sus_composition->ShowSelf(factor);
+};
+
+void FRDTControlRod::ShowSUSSmearedCoolantNumberDensity()
+{
+  real total_v=cr_geometry->GetShieldtubeInsideVolume();
+  real wpin_v=cr_geometry->GetWholePinVolume();
+  real swire_v=cr_geometry->GetSpacerwireVolume();
+  real pellet_v=cr_geometry->GetPelletVolume()+cr_geometry->GetPelletVoidVolume();
+  real sus_v=swire_v+cr_geometry->GetCladVolume();
+  real na_v=total_v-wpin_v-swire_v;
+  real hom_v=total_v-pellet_v;
+  cout<<"1125  "<<sodium_number_density*na_v/hom_v<<"\n";
+  real factor=sus_v/hom_v;
+  sus_composition->ShowSelf(factor);
+};
+
+void FRDTControlRod::ShowSelf()
+{
+  cout<<"\n# B4C pellet number density\n\n";
+  b4c_composition->ShowSelf();
+
+  cout<<"\n# Clad number density \n\n";
+  sus_composition->ShowSelf();
+
+  cout<<"\n#   (Gap-smeared density)\n\n";
+  ShowGapSmearedCladNumberDensity();
+
+  cout<<"\n# Sodium\n\n";
+  cout<<"1125  "<<sodium_number_density<<"\n";
+
+  cout<<"\n#   (Spacer wire-smeared coolant density)\n";
+  cout<<"#    (inside shielding tube)\n\n";
+  ShowSpacerwireSmearedCoolantNumberDensity();
+
+  cout<<"\n# +++++++++++++++++++++++++++++++++++\n\n";
+  cout<<"\n# Homogenized number density\n\n";
+  ShowHomogenizedNumberDensity();
+
+  cout<<"\n# Shieldtube inside homogenized number density\n\n";
+  ShowShieldtubeInsideHomogenizedNumberDensity();
+
+  cout<<"\n# Coolant-Clad-wire homogenized number density\n";
+  cout<<"#  (inside shielding tube)(for ring model)\n\n";
+  ShowSUSSmearedCoolantNumberDensity();
+
+  /*
+  real tv=cr_geometry->GetShieldtubeInsideVolume();
+  tv/=cr_geometry->GetNumberOfPin();
+  cout<<sqrt(tv/PI)<<"\n";
+  */
+};
+
+// +++ FRDTCoreDataManager +++
+
+void FRDTCoreDataManager::CylinderDataGeneration(int siz, int *map, real pitch)
+{
+  real area=pitch*pitch*sqrt(3.)*0.5;
+
+  int center=(siz-1)/2;
+
+  int maxid=0;
+  for(int i=0;i<siz*siz;i++){
+    if(map[i]>maxid)maxid=map[i];
+  };
+
+  vector<bool> mape(siz*siz,false);
+  mape[center*siz+center]=true;
+
+  vector<bool> mape_org(siz*siz,false);
+
+  real area_cum=area;
+  real radius=sqrt(area_cum/PI);
+  cout<<"Ring 0   ("<<radius<<")\n";
+  real radius_old=radius;
+  for(int i=0;i<center-1;i++){
+    for(int j=0;j<siz*siz;j++){
+      mape_org[j]=mape[j];
+    };
+    vector<int> idnum(maxid+1,0);
+    int num=0;
+    for(int y=1;y<siz-1;y++){
+      for(int x=1;x<siz-1;x++){
+	if(!mape[y*siz+x]){
+	  int pos=y*siz+x;
+	  bool flag=false;
+          if(mape_org[pos+1])flag=true;
+          if(mape_org[pos-1])flag=true;
+          int tmp=0;
+	  if(y%2==1)tmp=1;
+	  if(mape_org[pos-siz-tmp])flag=true;
+	  if(mape_org[pos-siz-tmp+1])flag=true;
+	  if(mape_org[pos+siz-tmp])flag=true;
+	  if(mape_org[pos+siz-tmp+1])flag=true;
+          if(flag){
+	    num++;
+            idnum[map[pos]]++;
+	    mape[pos]=true;
+	  };
+	};
+      };
+    };
+    area_cum+=num*area;
+    radius=sqrt(area_cum/PI);
+    cout<<"Ring "<<i+1<<" "<<num<<"  ("<<radius<<" "<<radius-radius_old<<")\n";
+    int mat=0;
+    for(int j=0;j<maxid;j++){
+      if(idnum[j]!=0){
+        cout<<"   "<<j<<" "<<idnum[j]<<"\n";
+	mat++;
+      };
+    };
+    if(mat>1){
+      int ist=-1;
+      for(int j=0;j<maxid;j++){
+	if(idnum[j]!=0&&ist==-1)ist=j;
+      };
+      real area2=area_cum-(num-idnum[ist])*area;
+      real radius2=sqrt(area2/PI);
+      cout<<"\n";
+      cout<<"  case A : dominant region locates inside ... radius : "<<radius2<<" "<<radius2-radius_old<<"\n";
+      cout<<"\n";
+
+      real area3=area_cum-num*area;
+      area3+=idnum[ist]/2*area;
+      real radius3=sqrt(area3/PI);
+      cout<<"  case B : \n";
+      cout<<"   ... half of dominant region ... radius : "<<radius3<<" "<<radius3-radius_old<<"\n";
+      area3+=(num-idnum[ist])*area;
+      real radius4=sqrt(area3/PI);
+      cout<<"   ... non-dominant region     ... radius : "<<radius4<<" "<<radius4-radius3<<"\n";
+      cout<<"   ... half of dominant region ... radius : "<<radius<<" "<<radius-radius4<<"\n";
+      cout<<"\n";
+
+      area2=area_cum-idnum[ist]*area;
+      radius2=sqrt(area2/PI);
+      cout<<"  case C : non-dominant region locates inside ... radius : "<<radius2<<" "<<radius2-radius_old<<"\n";
+      cout<<"\n";
+    };
+    radius_old=radius;
+  };
+
+};
+
+// ++ FRDTAssypow
+
+FRDTAssypow::FRDTAssypow(real ipitch)
+{
+  pitch=ipitch;
+
+  real r=pitch*0.3333333333333333;
+  real theta=-PI*0.33333333333;
+  for(int i=0;i<6;i++){
+    xpos[i]=r*cos(theta);
+    ypos[i]=r*sin(theta);
+    theta+=PI*0.333333333333333;
+  };
+
+  int index=6;
+  real r2=pitch;
+  real theta2=-PI*0.333333333333;
+  for(int i=0;i<6;i++){
+    real theta3=theta2+PI*0.3333333333333*2.;
+    real xc=r2*cos(theta2);
+    real yc=r2*sin(theta2);
+    for(int j=0;j<3;j++){
+      xpos[index]=xc+r*cos(theta3);
+      ypos[index]=yc+r*sin(theta3);
+      theta3+=PI*0.333333333333333333;
+      index++;
+    };
+    theta2+=PI*0.33333333333333;
+  };
+
+  xyf.resize(24);
+  for(int i=0;i<24;i++){
+    xyf[i].resize(10);
+  };
+
+  for(int i=0;i<24;i++){
+    xyf[i][0]=1.;
+    xyf[i][1]=xpos[i];
+    xyf[i][2]=ypos[i];
+    xyf[i][3]=xpos[i]*xpos[i];
+    xyf[i][4]=xpos[i]*ypos[i];
+    xyf[i][5]=ypos[i]*ypos[i];
+    xyf[i][6]=xpos[i]*xpos[i]*xpos[i];
+    xyf[i][7]=xpos[i]*xpos[i]*ypos[i];
+    xyf[i][8]=xpos[i]*ypos[i]*ypos[i];
+    xyf[i][9]=ypos[i]*ypos[i]*ypos[i];
+  };
+};
+
+void FRDTAssypow::DoFitting()
+{
+  for(int i=0;i<24;i++){
+    flx[i]=1.;
+    if(i>5)flx[i]=0.;
+  };
+
+  real amat[10*10];
+  real bmat[10];
+
+  for(int i=0;i<10*10;i++){
+    amat[i]=0.;
+  };
+  for(int i=0;i<10;i++){
+    bmat[i]=0.;
+  };
+
+  for(int y=0;y<10;y++){
+    for(int i=0;i<24;i++){
+      for(int j=0;j<10;j++){
+        amat[y*10+j]+=xyf[i][y]*xyf[i][j];
+      };
+      bmat[y]+=xyf[i][y]*flx[i];
+    };
+  };
+
+  gauss(amat,bmat,10,1);
+
+  /*
+  for(int i=0;i<24;i++){
+    real sol=0.;
+    for(int j=0;j<10;j++){
+      sol+=bmat[j]*xyf[i][j];
+    };
+    cout<<sol<<" "<<flx[i]<<"\n";
+  };
+  */
+};
+
+// ++ FRDTAssypow4th
+
+FRDTAssypow4th::FRDTAssypow4th(real ipitch,bool xy)
+{
+  pitch=ipitch;
+
+  if(xy){
+
+    PutNumc(15);
+    PutNump(25);
+
+    real vol=0.5*sqrt(3.)*pitch*pitch;
+    real xlen=pitch*0.5;
+    real ylen=vol/(xlen*2.)*0.5;
+
+    real yy=-ylen*2;
+    int index=0;
+    for(int y=0;y<5;y++){
+      real xx=-xlen*2;
+      for(int x=0;x<5;x++){
+        xpos[index]=xx;
+        ypos[index]=yy;
+        index++;
+        xx+=xlen;
+      };
+      yy+=ylen;
+    };
+
+  }else{
+
+    PutNumc(15);
+    PutNump(24);
+
+    real r=pitch*0.3333333333333333;
+    real theta=-PI*0.33333333333;
+    for(int i=0;i<6;i++){
+      xpos[i]=r*cos(theta);
+      ypos[i]=r*sin(theta);
+      theta+=PI*0.333333333333333;
+    };
+
+    int index=6;
+    real r2=pitch;
+    real theta2=-PI*0.333333333333;
+    for(int i=0;i<6;i++){
+      real theta3=theta2+PI*0.3333333333333*2.;
+      real xc=r2*cos(theta2);
+      real yc=r2*sin(theta2);
+      for(int j=0;j<3;j++){
+        xpos[index]=xc+r*cos(theta3);
+        ypos[index]=yc+r*sin(theta3);
+        theta3+=PI*0.333333333333333333;
+        index++;
+      };
+      theta2+=PI*0.33333333333333;
+    };
+
+  };
+
+  xyf.resize(num_p);
+  for(int i=0;i<num_p;i++){
+    xyf[i].resize(num_c);
+  };
+
+  for(int i=0;i<num_p;i++){
+    xyf[i][0]=1.;
+    xyf[i][1]=xpos[i];
+    xyf[i][2]=ypos[i];
+    xyf[i][3]=xpos[i]*xpos[i];
+    xyf[i][4]=xpos[i]*ypos[i];
+    xyf[i][5]=ypos[i]*ypos[i];
+    xyf[i][6]=xpos[i]*xpos[i]*xpos[i];
+    xyf[i][7]=xpos[i]*xpos[i]*ypos[i];
+    xyf[i][8]=xpos[i]*ypos[i]*ypos[i];
+    xyf[i][9]=ypos[i]*ypos[i]*ypos[i];
+    xyf[i][10]=xpos[i]*xpos[i]*xpos[i]*xpos[i];
+    xyf[i][11]=xpos[i]*xpos[i]*xpos[i]*ypos[i];
+    xyf[i][12]=xpos[i]*xpos[i]*ypos[i]*ypos[i];
+    xyf[i][13]=xpos[i]*ypos[i]*ypos[i]*ypos[i];
+    xyf[i][14]=ypos[i]*ypos[i]*ypos[i]*ypos[i];
+  };
+};
+
+void FRDTAssypow4th::PutNumc(int i)
+{
+  num_c=i;
+  coef.resize(num_c);
+};
+
+void FRDTAssypow4th::PutNump(int i)
+{
+  num_p=i;
+  xpos.resize(num_p);
+  ypos.resize(num_p);
+  flx.resize(num_p);
+};
+
+void FRDTAssypow4th::DoFitting()
+{
+  /*
+  for(int i=0;i<num_p;i++){
+    flx[i]=1.;
+    if(i>5)flx[i]=0.8;
+  };
+  */
+
+  real amat[num_c*num_c];
+  real bmat[num_c];
+
+  for(int i=0;i<num_c*num_c;i++){
+    amat[i]=0.;
+  };
+  for(int i=0;i<num_c;i++){
+    bmat[i]=0.;
+  };
+
+  for(int y=0;y<num_c;y++){
+    for(int i=0;i<num_p;i++){
+      for(int j=0;j<num_c;j++){
+        amat[y*num_c+j]+=xyf[i][y]*xyf[i][j];
+      };
+      bmat[y]+=xyf[i][y]*flx[i];
+    };
+  };
+
+  gauss(amat,bmat,num_c,1);
+
+  for(int i=0;i<num_c;i++){
+    coef[i]=bmat[i];
+  };
+  /*
+  for(int i=0;i<num_p;i++){
+    real sol=0.;
+    for(int j=0;j<num_c;j++){
+      sol+=bmat[j]*xyf[i][j];
+    };
+    cout<<sol<<" "<<flx[i]<<"\n";
+  };
+  */
+};
+
+void FRDTAssypow4th::PutFlux(real *inp)
+{
+  for(int i=0;i<num_p;i++){
+    flx[i]=inp[i];
+  };
+};
+
+real FRDTAssypow4th::GetValue(real x,real y)
+{
+  real xyfn[num_c];
+  xyfn[0]=1;
+  xyfn[1]=x;
+  xyfn[2]=y;
+  xyfn[3]=x*x;
+  xyfn[4]=x*y;
+  xyfn[5]=y*y;
+  xyfn[6]=x*x*x;
+  xyfn[7]=x*x*y;
+  xyfn[8]=x*y*y;
+  xyfn[9]=y*y*y;
+  xyfn[10]=x*x*x*x;
+  xyfn[11]=x*x*x*y;
+  xyfn[12]=x*x*y*y;
+  xyfn[13]=x*y*y*y;
+  xyfn[14]=y*y*y*y;
+
+  real ret=0.;
+  for(int i=0;i<num_c;i++){
+    ret+=xyfn[i]*coef[i];
+  };
+
+  return ret;
+};
+
+// +++++++++++++++++++++++++++++++++
+
+void GetAssemblyPosition(int layer,real pin_pitch,real *x,real *y)
+{
+  x[0]=0.;
+  y[0]=0.;
+  real xtm=0.;
+  real ytm=0.;
+  real pnp=pin_pitch;
+
+  real vec_x[6];
+  real vec_y[6];
+  for(int i=0;i<6;i++){
+    real theta=PI*0.16666666666+PI*0.333333333333*(i+3);
+    vec_x[i]=cos(theta);
+    vec_y[i]=sin(theta);
+  };
+
+  int idx=1;
+  for(int i=0;i<layer;i++){
+    ytm=pnp*(i+1);
+    for(int j=0;j<6;j++){
+      for(int k=0;k<i+1;k++){
+        x[idx]=xtm;
+        y[idx]=ytm;
+        idx++;
+        xtm+=vec_x[j]*pnp;
+	ytm+=vec_y[j]*pnp;
+      };
+    };
+  };
+
+};
+
