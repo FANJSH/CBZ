@@ -5,3 +5,8 @@ this work has not been done by git or github.
 To help me (us) on version control, this repo is
 created. 
     --Fan
+
+
+After the first commit, I am not sure about the working 
+process of git. So commit again. 
+    --Fan
