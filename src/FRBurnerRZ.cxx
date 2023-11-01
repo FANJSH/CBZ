@@ -1,7 +1,7 @@
 #include <cstdlib>
 #include "FRBurnerRZ.h"
 
-#define calculation_theory 3 // 0:diffusion, 1:Tranpsort(SN), 2: SP3, 3:OSP3
+#define calculation_theory 0 // 0:diffusion, 1:Tranpsort(SN), 2: SP3, 3:OSP3
 
 FRBurnerRZ::FRBurnerRZ(int group_inp, int tnn, int *mninp)
 {
@@ -1543,7 +1543,6 @@ real FRBurnerRZ::CalVoidReactivity(int vmednum, int *vmedlist)
 
   GeneralOption opt,opta;
   opta.PutAdjointCal();
-cout<<"# 3. Adjoint calculation actived. "<<endl;
 // --- (DIFFUSION/SP3 THEORY) ------------------------------
 #if (calculation_theory != 1)
   PLOSSystem testa(dim,group,mednum); 
@@ -1603,13 +1602,9 @@ cout<<"# 5. Current calculation method: SP3."<<endl;
 cout<<"# 5. Current calculation method: OSP3."<<endl;
   // (OSP3)
   PLOSSystem testa_p2,test_v_p2;
-  cout<<"# Creating two PLOS system instances for phi-2 equation."<<endl;
   real k1=testa.CalOSP3Adjoint(testa_p2);
-  cout<<"# Calculate keff of adjoint phi-2."<<endl;
   real kv=test_v.CalSP3(test_v_p2);
-  cout<<"# Calculate keff of void system forward equation."<<endl;
   real rho=testa.CalReactivityOSP3(&testa_p2,&test_v,&test_v_p2,k1,kv);
-  cout<<"# OSP3 preparation cal finished."<<endl;
 #endif
 
   // -----------------------------------------------------

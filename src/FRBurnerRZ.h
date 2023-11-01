@@ -8,7 +8,6 @@
 #include <string>
 #include <map>
 #include <chrono> // to logging the running time 
-
 #include "PLOSE_system.h"
 #include "PLOS_system.h"
 #include "SNRZ_system.h"

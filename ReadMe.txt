@@ -22,3 +22,7 @@ The FRBurner.cxx of my local machine can control the whole-core calculation meth
 SN, SP3 and OSP3(only for reactivity calculation). 
 It is necessary to submit my version of FRBurner.cxx to the CBZ repository. 
     --Fan 20231101
+
+The FRBurner files are modified based on my frequently used version. 
+Some cout informations used as check-point are deleted from FRBurner.cxx. 
+    --Fan 20231101
