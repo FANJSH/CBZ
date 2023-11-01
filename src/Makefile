@@ -11,46 +11,47 @@ AR = ar -crsv
 RM = rm -f
 
 TARGET = libCBG.a
-OBJS = Numeric.o FunctionTable.o GeneralOption.o GroupData.o CartCore.o CartMeshInfo.o \
-       GeneralMesh.o Medium.o Bessel.o GeomVector.o GeomPlane.o IrregularGeometryInformation.o \
-       SphericalHarmonics.o GroupDataSet.o Nuclide.o \
-       DelayedNeutronData.o GeneralSystem.o \
-       UNC_Covariance.o \
-       UNC_CrossSection.o UNC.o UNC_Parameters.o UNC_Sensitivity.o \
-       CartesianLattice.o \
-       LibData.o GammaLibData.o GammaTool.o \
-       PLOS_system.o  \
-       PLOSE_system.o \
-       SNT_system.o Quadrature.o \
-       SNR_system.o SNR_quadrature.o  \
-       SNRZ_system.o SNRZ_quadrature.o \
-       PJI_trajectory.o PJI_trajectoryset.o PJI_system.o PJI_slabpij.o \
-       MEC_system.o \
-       PNX_system.o \
-       ABEMIE_core.o ABEMIE_medium.o ABEMIE_plane.o ABEMIE_region.o \
-       DHEX_system.o \
-       OnePointCalculator.o SelfShieldingCalculator.o \
-       Burnup.o BurnupChain.o Burner.o FRBurnerRZ.o Cooler.o \
-       CrossSectionEdit.o \
-       HigherModeCalculator.o \
-       FRDesignTool.o FRDesign.o \
-       PKR.o \
-       OktavianTool.o SVDTool.o ENDFIDTranslator.o MATIDTranslator.o \
-       BurnupChainGenerator.o \
-       KineticUtility.o \
-       PincellCalculator.o \
-       RandomSamplingSupporter.o \
-       SensitivityData.o SUTool.o \
-       YieldDecayCovariance.o \
-       MultiStepCalculation.o \
-       MulticellBurner.o \
-       GeneralBurner.o \
-       Pij_dyn.o \
-       FMG_Tool.o \
-	GData.o \
-	HeatConductionCalculator.o jsmest.o jsmest_wrapper.o TwoPhaseFlowCalculator.o \
-	RMforFR.o 
-
+OBJS = 	Numeric.o FunctionTable.o GeneralOption.o GroupData.o CartCore.o CartMeshInfo.o \
+       	GeneralMesh.o Medium.o Bessel.o GeomVector.o GeomPlane.o IrregularGeometryInformation.o \
+       	SphericalHarmonics.o GroupDataSet.o Nuclide.o \
+       	DelayedNeutronData.o GeneralSystem.o \
+       	UNC_Covariance.o \
+       	UNC_CrossSection.o UNC.o UNC_Parameters.o UNC_Sensitivity.o \
+       	CartesianLattice.o \
+       	LibData.o GammaLibData.o GammaTool.o \
+       	PLOS_system.o  \
+       	PLOSE_system.o \
+       	SNT_system.o Quadrature.o \
+       	SNR_system.o SNR_quadrature.o  \
+       	SNRZ_system.o SNRZ_quadrature.o \
+       	PJI_trajectory.o PJI_trajectoryset.o PJI_system.o PJI_slabpij.o \
+       	MEC_system.o \
+       	PNX_system.o \
+       	ABEMIE_core.o ABEMIE_medium.o ABEMIE_plane.o ABEMIE_region.o \
+       	DHEX_system.o \
+       	OnePointCalculator.o SelfShieldingCalculator.o \
+       	Burnup.o BurnupChain.o Burner.o FRBurnerRZ.o Cooler.o \
+       	CrossSectionEdit.o \
+       	HigherModeCalculator.o \
+       	FRDesignTool.o FRDesign.o \
+       	PKR.o \
+       	OktavianTool.o SVDTool.o ENDFIDTranslator.o MATIDTranslator.o \
+       	BurnupChainGenerator.o \
+       	KineticUtility.o \
+       	PincellCalculator.o \
+       	RandomSamplingSupporter.o \
+       	SensitivityData.o SUTool.o \
+       	YieldDecayCovariance.o \
+       	MultiStepCalculation.o \
+       	MulticellBurner.o \
+       	GeneralBurner.o \
+       	Pij_dyn.o \
+       	FMG_Tool.o \
+		GData.o \
+		HeatConductionCalculator.o jsmest.o jsmest_wrapper.o TwoPhaseFlowCalculator.o \
+		RMforFR.o BNCTPerturbator.o\
+		SomeOutputMethod.o\
+		ResonanceCalculationFan.o
 
 OUTPUTS =
 BACKUPS = *~
@@ -339,7 +340,7 @@ PincellCalculator.o : PincellCalculator.cxx PincellCalculator.h Numeric.h PJI_tr
 SensitivityData.o : SensitivityData.cxx SensitivityData.h GroupData.h Numeric.h MATIDTranslator.h
 	${CXX} ${CXXFLAGS} -c SensitivityData.cxx
 
-SUTool.o : SUTool.cxx SUTool.h GroupData.h Numeric.h SensitivityData.h LibData.h
+SUTool.o : SUTool.cxx SUTool.h GroupData.h Numeric.h SensitivityData.h LibData.h BurnupChain.h
 	${CXX} ${CXXFLAGS} -c SUTool.cxx
 
 ## --
@@ -352,13 +353,13 @@ RandomSamplingSupporter.o : RandomSamplingSupporter.cxx RandomSamplingSupporter.
 MulticellBurner.o : MulticellBurner.cxx MulticellBurner.h \
 	Numeric.h SensitivityData.h Medium.h IrregularGeometryInformation.h PJI_trajectoryset.h \
 	PJI_system.h Burnup.h SelfShieldingCalculator.h OnePointCalculator.h LibData.h \
-	GeneralBurner.h MEC_system.h
+	GeneralBurner.h MEC_system.h GData.h 
 	${CXX} ${CXXFLAGS} -c MulticellBurner.cxx
 ## --
 
 GeneralBurner.o : GeneralBurner.cxx GeneralBurner.h \
 	Numeric.h LibData.h MATIDTranslator.h OnePointCalculator.h SelfShieldingCalculator.h \
-	Medium.h FRDesignTool.h PJI_trajectoryset.h
+	Medium.h FRDesignTool.h PJI_trajectoryset.h Burnup.h
 	${CXX} ${CXXFLAGS} -c GeneralBurner.cxx
 
 ## --
@@ -396,6 +397,16 @@ TwoPhaseFlowCalculator.o: TwoPhaseFlowCalculator.cxx TwoPhaseFlowCalculator.h js
 
 RMforFR.o: RMforFR.cxx RMforFR.h Numeric.h
 	${CXX} ${CXXFLAGS} -c RMforFR.cxx
+
+BNCTPerturbator.o: BNCTPerturbator.cxx BNCTPerturbator.h PLOS_system.h GammaTool.h Medium.h \
+	SNR_system.h SNR_quadrature.cxx
+	${CXX} ${CXXFLAGS} -c BNCTPerturbator.cxx 
+SomeOutputMethod.o: SomeOutputMethod.cxx GeneralSystem.h GeneralMesh.h Medium.h PLOS_system.h\
+	SNT_system.h CartMeshInfo.h 
+	${CXX} ${CXXFLAGS} -c SomeOutputMethod.cxx 
+
+ResonanceCalculationFan.o: ResonanceCalculationFan.cxx Medium.h Numeric.h
+	${CXX} ${CXXFLAGS} -c ResonanceCalculationFan.cxx 
 
 
 clean:
